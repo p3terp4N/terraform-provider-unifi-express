@@ -3,7 +3,7 @@ package base
 import (
 	"context"
 	"errors"
-	ut "github.com/filipowm/terraform-provider-unifi/internal/provider/types"
+	ut "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
 	"sync"
 	"testing"
 

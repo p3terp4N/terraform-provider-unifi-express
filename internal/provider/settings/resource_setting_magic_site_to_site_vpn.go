@@ -2,10 +2,10 @@ package settings
 
 import (
 	"context"
-	ut "github.com/filipowm/terraform-provider-unifi/internal/provider/types"
+	ut "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
 
 	"github.com/filipowm/go-unifi/unifi"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"

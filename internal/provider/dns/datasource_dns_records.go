@@ -3,8 +3,8 @@ package dns
 import (
 	"context"
 	"fmt"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
-	ut "github.com/filipowm/terraform-provider-unifi/internal/provider/types"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
+	ut "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"

@@ -20,7 +20,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/validators"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/validators"
 )
 
 // Helper function to convert types.Int32 to tftypes.Value

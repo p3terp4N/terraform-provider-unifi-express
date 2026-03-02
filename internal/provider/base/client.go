@@ -5,8 +5,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/filipowm/go-unifi/unifi"
-	ut "github.com/filipowm/terraform-provider-unifi/internal/provider/types"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/utils"
+	ut "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -22,7 +22,6 @@ import (
 type ClientConfig struct {
 	Username       string
 	Password       string
-	ApiKey         string
 	Url            string
 	Site           string
 	Insecure       bool
@@ -34,35 +33,35 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 		URL:                      cfg.Url,
 		User:                     cfg.Username,
 		Password:                 cfg.Password,
-		APIKey:                   cfg.ApiKey,
+		RememberMe:               true,
 		HttpRoundTripperProvider: cfg.HttpConfigurer,
 		ValidationMode:           unifi.DisableValidation,
 		Logger:                   unifi.NewDefaultLogger(unifi.WarnLevel),
 	}
-	if cfg.Username != "" && cfg.Password != "" {
-		config.User = cfg.Username
-		config.Password = cfg.Password
-		config.RememberMe = true
-	} else {
-		config.APIKey = cfg.ApiKey
-	}
 	unifiClient, err := unifi.NewClient(config)
+	if err != nil {
+		return nil, err
+	}
 
-	if err != nil {
-		return nil, err
-	}
-	err = CheckMinimumControllerVersion(unifiClient.Version())
 	log.Printf("[TRACE] Unifi controller version: %q", unifiClient.Version())
+
+	err = CheckMinimumControllerVersion(unifiClient.Version())
 	if err != nil {
 		return nil, err
 	}
+
+	v := version.Must(version.NewVersion(unifiClient.Version()))
+	if v.LessThan(ExpressMinVersion) || v.GreaterThanOrEqual(ExpressMaxVersion) {
+		return nil, fmt.Errorf(
+			"this provider targets UniFi Express (Network Application 8.x), detected version %s",
+			v,
+		)
+	}
+
 	c := &Client{
 		Client:  NewRetryableUnifiClient(unifiClient),
 		Site:    cfg.Site,
-		Version: version.Must(version.NewVersion(unifiClient.Version())),
-	}
-	if cfg.ApiKey != "" && !c.SupportsApiKeyAuthentication() {
-		return nil, fmt.Errorf("API key authentication is not supported on this controller version: %s, you must be on %s or higher", c.Version, ControllerVersionApiKeyAuth)
+		Version: v,
 	}
 	return c, nil
 }

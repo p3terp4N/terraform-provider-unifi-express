@@ -2,13 +2,13 @@ package provider
 
 import (
 	"context"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/dns"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/firewall"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/portal"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/settings"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/utils"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/validators"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/dns"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/firewall"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/portal"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/settings"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/validators"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -39,7 +39,6 @@ type unifiProvider struct {
 type unifiProviderModel struct {
 	Username types.String `tfsdk:"username"`
 	Password types.String `tfsdk:"password"`
-	APIKey   types.String `tfsdk:"api_key"`
 	APIUrl   types.String `tfsdk:"api_url"`
 	Site     types.String `tfsdk:"site"`
 	Insecure types.Bool   `tfsdk:"allow_insecure"`
@@ -59,11 +58,6 @@ func (p *unifiProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp
 			},
 			"password": schema.StringAttribute{
 				MarkdownDescription: ProviderPasswordDescription,
-				Optional:            true,
-				Sensitive:           true,
-			},
-			"api_key": schema.StringAttribute{
-				MarkdownDescription: ProviderAPIKeyDescription,
 				Optional:            true,
 				Sensitive:           true,
 			},
@@ -120,7 +114,6 @@ func (p *unifiProvider) Configure(ctx context.Context, req provider.ConfigureReq
 	// Check environment variables
 	username := utils.GetAnyStringEnv("UNIFI_USERNAME")
 	password := utils.GetAnyStringEnv("UNIFI_PASSWORD")
-	apiKey := utils.GetAnyStringEnv("UNIFI_API_KEY")
 	apiUrl := utils.GetAnyStringEnv("UNIFI_API")
 	site := utils.GetAnyStringEnv("UNIFI_SITE")
 	insecure := utils.GetAnyBoolEnv("UNIFI_INSECURE")
@@ -131,9 +124,6 @@ func (p *unifiProvider) Configure(ctx context.Context, req provider.ConfigureReq
 	if !cfg.Password.IsNull() {
 		password = cfg.Password.ValueString()
 	}
-	if !cfg.APIKey.IsNull() {
-		apiKey = cfg.APIKey.ValueString()
-	}
 	if !cfg.APIUrl.IsNull() {
 		apiUrl = cfg.APIUrl.ValueString()
 	}
@@ -143,10 +133,8 @@ func (p *unifiProvider) Configure(ctx context.Context, req provider.ConfigureReq
 	if !cfg.Insecure.IsNull() {
 		insecure = cfg.Insecure.ValueBool()
 	}
-	if apiKey != "" && (username != "" || password != "") {
-		resp.Diagnostics.AddAttributeError(path.Root("api_key"), "Two authentication methods configured", "Only one of `username`/`password` or `api_key` can be set")
-	} else if apiKey == "" && (username == "" || password == "") {
-		resp.Diagnostics.AddAttributeError(path.Root("api_key"), "Missing UniFi API credentials", "Either `username`/`password` or `api_key` must be set")
+	if username == "" || password == "" {
+		resp.Diagnostics.AddAttributeError(path.Root("username"), "Missing UniFi API credentials", "`username` and `password` must both be set")
 	}
 	if apiUrl == "" {
 		resp.Diagnostics.AddAttributeError(path.Root("api_url"), "Missing UniFi API URL", "The `api_url` attribute must be set")
@@ -160,7 +148,6 @@ func (p *unifiProvider) Configure(ctx context.Context, req provider.ConfigureReq
 	c, err := base.NewClient(&base.ClientConfig{
 		Username: username,
 		Password: password,
-		ApiKey:   apiKey,
 		Url:      apiUrl,
 		Site:     site,
 		Insecure: insecure,
@@ -183,14 +170,11 @@ func (p *unifiProvider) Resources(_ context.Context) []func() resource.Resource 
 		settings.NewCountryResource,
 		settings.NewDpiResource,
 		settings.NewGuestAccessResource,
-		settings.NewIpsResource,
-		settings.NewLcmResource,
 		settings.NewLocaleResource,
 		settings.NewMagicSiteToSiteVpnResource,
 		settings.NewNetworkOptimizationResource,
 		settings.NewNtpResource,
 		settings.NewRsyslogdResource,
-		settings.NewSslInspectionResource,
 		settings.NewTeleportResource,
 		settings.NewMgmtResource,
 		settings.NewUsgResource,

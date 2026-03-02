@@ -2,13 +2,13 @@ package settings
 
 import (
 	"context"
-	ut "github.com/filipowm/terraform-provider-unifi/internal/provider/types"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/validators"
+	ut "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/validators"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 
 	"github.com/filipowm/go-unifi/unifi"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"

@@ -3,7 +3,7 @@ package acctest
 import (
 	"testing"
 
-	pt "github.com/filipowm/terraform-provider-unifi/internal/provider/testing"
+	pt "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/testing"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 

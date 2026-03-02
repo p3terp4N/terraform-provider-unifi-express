@@ -2,8 +2,8 @@ package acctest
 
 import (
 	"fmt"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
-	pt "github.com/filipowm/terraform-provider-unifi/internal/provider/testing"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
+	pt "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/testing"
 	"net"
 	"testing"
 

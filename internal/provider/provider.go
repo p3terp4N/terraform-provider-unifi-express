@@ -4,17 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/apgroup"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/device"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/dns"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/firewall"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/network"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/radius"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/routing"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/settings"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/site"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/user"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/apgroup"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/device"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/dns"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/firewall"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/network"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/radius"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/routing"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/settings"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/site"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/user"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -25,10 +25,9 @@ import (
 const (
 	ProviderUsernameDescription = "Local user name for the Unifi controller API. Can be specified with the `UNIFI_USERNAME` environment variable."
 	ProviderPasswordDescription = "Password for the user accessing the API. Can be specified with the `UNIFI_PASSWORD` environment variable."
-	ProviderAPIKeyDescription   = "API Key for the user accessing the API. Can be specified with the `UNIFI_API_KEY` environment variable. Controller version 9.0.108 or later is required."
-	ProviderAPIURLDescription   = "URL of the controller API. Can be specified with the `UNIFI_API` environment variable. " +
-		"You should **NOT** supply the path (`/api`), the SDK will discover the appropriate paths. This is to support UDM Pro style API paths as well as more standard controller paths."
-	ProviderSiteDescription          = "The site in the Unifi controller this provider will manage. Can be specified with the `UNIFI_SITE` environment variable. Default: `default`"
+	ProviderAPIURLDescription = "URL of the UniFi Express controller API. Can be specified with the `UNIFI_API` environment variable. " +
+		"Typically `https://<express-ip>:8443`. You should **NOT** supply the path (`/api`), the SDK will discover the appropriate paths."
+	ProviderSiteDescription = "The site in the UniFi Express controller this provider will manage. Can be specified with the `UNIFI_SITE` environment variable. Default: `default`"
 	ProviderAllowInsecureDescription = "Skip verification of TLS certificates of API requests. You may need to set this to `true` " +
 		"if you are using your local API without setting up a signed certificate. Can be specified with the " +
 		"`UNIFI_INSECURE` environment variable."
@@ -65,13 +64,6 @@ func New(version string) func() *schema.Provider {
 					Optional:    true,
 					Sensitive:   true,
 					DefaultFunc: schema.EnvDefaultFunc("UNIFI_PASSWORD", ""),
-				},
-				"api_key": {
-					Description: ProviderAPIKeyDescription,
-					Type:        schema.TypeString,
-					Optional:    true,
-					Sensitive:   true,
-					DefaultFunc: schema.EnvDefaultFunc("UNIFI_API_KEY", ""),
 				},
 				"api_url": {
 					Description: ProviderAPIURLDescription,
@@ -136,11 +128,8 @@ func configure(v string, p *schema.Provider) schema.ConfigureContextFunc {
 	return func(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 		user := d.Get("username").(string)
 		pass := d.Get("password").(string)
-		apiKey := d.Get("api_key").(string)
-		if apiKey != "" && (user != "" || pass != "") {
-			return nil, diag.FromErr(errors.New("only one of `username`/`password` or `api_key` can be set"))
-		} else if apiKey == "" && (user == "" || pass == "") {
-			return nil, diag.FromErr(errors.New("either `username` and `password` or `api_key` must be set"))
+		if user == "" || pass == "" {
+			return nil, diag.FromErr(errors.New("`username` and `password` must both be set"))
 		}
 		baseURL := d.Get("api_url").(string)
 		site := d.Get("site").(string)
@@ -149,7 +138,6 @@ func configure(v string, p *schema.Provider) schema.ConfigureContextFunc {
 		c, err := base.NewClient(&base.ClientConfig{
 			Username: user,
 			Password: pass,
-			ApiKey:   apiKey,
 			Url:      baseURL,
 			Site:     site,
 			HttpConfigurer: func() http.RoundTripper {

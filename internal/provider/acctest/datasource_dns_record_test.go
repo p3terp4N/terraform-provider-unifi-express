@@ -5,8 +5,8 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
-	pt "github.com/filipowm/terraform-provider-unifi/internal/provider/testing"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
+	pt "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/testing"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
