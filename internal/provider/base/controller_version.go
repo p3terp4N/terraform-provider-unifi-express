@@ -3,7 +3,7 @@ package base
 import (
 	"context"
 	"fmt"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/types"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -18,21 +18,20 @@ func AsVersion(versionString string) *version.Version {
 
 // TODO remove this legacy
 var (
-	ControllerV6                = AsVersion("6.0.0")
-	ControllerV7                = AsVersion("7.0.0")
-	ControllerV8                = AsVersion("8.0.0")
-	ControllerV9                = AsVersion("9.0.0")
-	ControllerVersionApiKeyAuth = AsVersion("9.0.108")
+	ControllerV6 = AsVersion("6.0.0")
+	ControllerV7 = AsVersion("7.0.0")
+	ControllerV8 = AsVersion("8.0.0")
+	ControllerV9 = AsVersion("9.0.0")
 	// https://community.ui.com/releases/UniFi-Network-Application-8-2-93/fce86dc6-897a-4944-9c53-1eec7e37e738
 	ControllerVersionDnsRecords = AsVersion("8.2.93")
 
 	// https://community.ui.com/releases/UniFi-Network-Controller-6-1-61/62f1ad38-1ac5-430c-94b0-becbb8f71d7d
 	ControllerVersionWPA3 = AsVersion("6.1.61")
-)
 
-func (c *Client) SupportsApiKeyAuthentication() bool {
-	return c.Version.GreaterThanOrEqual(ControllerVersionApiKeyAuth)
-}
+	// UniFi Express version constraints (Network Application 8.x)
+	ExpressMinVersion = AsVersion("8.0.0")
+	ExpressMaxVersion = AsVersion("9.0.0")
+)
 
 func (c *Client) SupportsWPA3() bool {
 	return c.Version.GreaterThanOrEqual(ControllerVersionWPA3)

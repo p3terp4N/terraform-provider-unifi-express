@@ -3,7 +3,7 @@ package validators
 import (
 	"context"
 	"fmt"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/types"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
 	"strings"
 	"time"
 

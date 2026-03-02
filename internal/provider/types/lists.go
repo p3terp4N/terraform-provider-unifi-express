@@ -2,7 +2,7 @@ package types
 
 import (
 	"context"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/utils"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/defaults"

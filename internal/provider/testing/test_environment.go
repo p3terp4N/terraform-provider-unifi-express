@@ -6,7 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"net/http"
@@ -209,6 +209,15 @@ func (te *TestEnvironment) WaitUntilReady() error {
 
 func (te *TestEnvironment) Start() error {
 	tflog.Error(te.ctx, "Starting test environment")
+
+	// Support external controller (e.g. real UniFi Express device)
+	if endpoint := os.Getenv("UNIFI_API"); endpoint != "" {
+		te.Endpoint = endpoint
+		te.Shutdown = func() {}
+		tflog.Info(te.ctx, "Using external controller at "+te.Endpoint)
+		return nil
+	}
+
 	if te.isReady() {
 		tflog.Warn(te.ctx, "Environment is already running at "+te.Endpoint)
 		if te.Client == nil {
@@ -248,8 +257,15 @@ func (te *TestEnvironment) waitForController(ctx context.Context) {
 }
 
 func (te *TestEnvironment) newTestClient() (unifi.Client, error) {
-	const user = "admin"
-	const password = "admin"
+	user := os.Getenv("UNIFI_USERNAME")
+	password := os.Getenv("UNIFI_PASSWORD")
+	if user == "" {
+		user = "admin"
+	}
+	if password == "" {
+		password = "admin"
+	}
+
 	var err error
 	if err = os.Setenv("UNIFI_USERNAME", user); err != nil {
 		return nil, err

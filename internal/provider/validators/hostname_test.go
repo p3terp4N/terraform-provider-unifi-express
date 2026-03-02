@@ -2,7 +2,7 @@ package validators_test
 
 import (
 	"context"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/validators"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/validators"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"

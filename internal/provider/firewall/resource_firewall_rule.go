@@ -3,12 +3,12 @@ package firewall
 import (
 	"context"
 	"errors"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/utils"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/validators"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/validators"
 	"regexp"
 
 	"github.com/filipowm/go-unifi/unifi"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"

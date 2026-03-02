@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/filipowm/go-unifi/unifi"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/utils"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"

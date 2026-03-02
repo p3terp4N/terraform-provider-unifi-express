@@ -2,8 +2,8 @@ package user
 
 import (
 	"context"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/base"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/utils"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"

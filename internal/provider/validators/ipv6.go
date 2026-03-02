@@ -3,7 +3,7 @@ package validators
 import (
 	"context"
 	"fmt"
-	"github.com/filipowm/terraform-provider-unifi/internal/provider/utils"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
