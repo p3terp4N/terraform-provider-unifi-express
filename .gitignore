@@ -8,3 +8,8 @@ vendor/
 
 .idea
 *.iml
+
+# Terraform local state
+*.tfstate
+*.tfstate.*
+*.tfvars
