@@ -3,11 +3,13 @@ package acctest
 import (
 	"testing"
 
+	pt "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/testing"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
 func TestAccExpressCompatibility_ControllerVersion(t *testing.T) {
+	pt.MarkAccTest(t)
 	v, err := version.NewVersion(testClient.Version())
 	if err != nil {
 		t.Fatalf("failed to parse controller version: %s", err)

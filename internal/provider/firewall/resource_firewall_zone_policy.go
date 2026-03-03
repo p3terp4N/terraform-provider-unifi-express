@@ -109,7 +109,7 @@ func (m *FirewallPolicyTargetModel) AttributeTypes() map[string]attr.Type {
 	}
 }
 
-func NewFirewallPolicyTargetModel(ipGroupId string, ips []string, matchOppositeIps, matchOppositePorts bool, port int, portGroupId, zoneId string) *FirewallPolicyTargetModel {
+func NewFirewallPolicyTargetModel(ipGroupId string, ips []string, matchOppositeIps, matchOppositePorts bool, port int, portGroupId, zoneId string) (*FirewallPolicyTargetModel, diag.Diagnostics) {
 	diags := diag.Diagnostics{}
 	m := &FirewallPolicyTargetModel{
 		IPGroupID:          ut.StringOrNull(ipGroupId),
@@ -127,7 +127,7 @@ func NewFirewallPolicyTargetModel(ipGroupId string, ips []string, matchOppositeI
 		diags.Append(d...)
 		m.IPs = lIps
 	}
-	return m
+	return m, diags
 }
 
 // FirewallZonePolicySourceModel represents the source configuration for a firewall zone policy
@@ -402,8 +402,13 @@ func (m *FirewallZonePolicyModel) AsUnifiModel(ctx context.Context) (interface{}
 func (m *FirewallZonePolicyModel) mergeSource(ctx context.Context, model *unifi.FirewallZonePolicy) diag.Diagnostics {
 	diags := diag.Diagnostics{}
 
+	targetModel, targetDiags := NewFirewallPolicyTargetModel(model.Source.IPGroupID, model.Source.IPs, model.Source.MatchOppositeIPs, model.Source.MatchOppositePorts, model.Source.Port, model.Source.PortGroupID, model.Source.ZoneID)
+	diags.Append(targetDiags...)
+	if diags.HasError() {
+		return diags
+	}
 	sourceModel := &FirewallZonePolicySourceModel{
-		FirewallPolicyTargetModel: *NewFirewallPolicyTargetModel(model.Source.IPGroupID, model.Source.IPs, model.Source.MatchOppositeIPs, model.Source.MatchOppositePorts, model.Source.Port, model.Source.PortGroupID, model.Source.ZoneID),
+		FirewallPolicyTargetModel: *targetModel,
 		MAC:                       ut.StringOrNull(model.Source.MAC),
 		MatchOppositeNetworks:     types.BoolValue(model.Source.MatchOppositeNetworks),
 		MACs:                      types.ListNull(types.StringType),
@@ -442,8 +447,13 @@ func (m *FirewallZonePolicyModel) mergeSource(ctx context.Context, model *unifi.
 
 func (m *FirewallZonePolicyModel) mergeDestination(ctx context.Context, model *unifi.FirewallZonePolicy) diag.Diagnostics {
 	diags := diag.Diagnostics{}
+	destTargetModel, destTargetDiags := NewFirewallPolicyTargetModel(model.Destination.IPGroupID, model.Destination.IPs, model.Destination.MatchOppositeIPs, model.Destination.MatchOppositePorts, model.Destination.Port, model.Destination.PortGroupID, model.Destination.ZoneID)
+	diags.Append(destTargetDiags...)
+	if diags.HasError() {
+		return diags
+	}
 	destModel := &FirewallZonePolicyDestinationModel{
-		FirewallPolicyTargetModel: *NewFirewallPolicyTargetModel(model.Destination.IPGroupID, model.Destination.IPs, model.Destination.MatchOppositeIPs, model.Destination.MatchOppositePorts, model.Destination.Port, model.Destination.PortGroupID, model.Destination.ZoneID),
+		FirewallPolicyTargetModel: *destTargetModel,
 		AppCategoryIDs:            types.ListNull(types.StringType),
 		AppIDs:                    types.ListNull(types.StringType),
 		Regions:                   types.ListNull(types.StringType),
@@ -470,7 +480,7 @@ func (m *FirewallZonePolicyModel) mergeDestination(ctx context.Context, model *u
 	case "ANY":
 		// do nothing as handled commonly
 	default:
-		diags.AddWarning("Unexpected matching target", fmt.Sprintf("Destination matching target is %s, which is not supported by the provider", model.Source.MatchingTarget))
+		diags.AddWarning("Unexpected matching target", fmt.Sprintf("Destination matching target is %s, which is not supported by the provider", model.Destination.MatchingTarget))
 	}
 
 	// Create object value from source model
@@ -513,6 +523,7 @@ func (m *FirewallZonePolicyModel) Merge(ctx context.Context, other interface{}) 
 
 	model, ok := other.(*unifi.FirewallZonePolicy)
 	if !ok {
+		diags.AddError("Invalid model type", fmt.Sprintf("Expected *unifi.FirewallZonePolicy, got %T", other))
 		return diags
 	}
 

@@ -975,10 +975,12 @@ func (g *guestAccessResource) Schema(_ context.Context, _ resource.SchemaRequest
 					"login_id": schema.StringAttribute{
 						MarkdownDescription: "Authorize.net login ID for authentication.",
 						Required:            true,
+						Sensitive:           true,
 					},
 					"transaction_key": schema.StringAttribute{
 						MarkdownDescription: "Authorize.net transaction key for authentication.",
 						Required:            true,
+						Sensitive:           true,
 					},
 				},
 			},
@@ -1077,12 +1079,12 @@ func (g *guestAccessResource) Schema(_ context.Context, _ resource.SchemaRequest
 					"client_id": schema.StringAttribute{
 						MarkdownDescription: "Google client ID for authentication.",
 						Required:            true,
-						//Sensitive:           true,
+						Sensitive:           true,
 					},
 					"client_secret": schema.StringAttribute{
 						MarkdownDescription: "Google client secret for authentication.",
 						Required:            true,
-						//Sensitive:           true,
+						Sensitive:           true,
 					},
 					"domain": schema.StringAttribute{
 						MarkdownDescription: "Restrict Google authentication to specific domain.",

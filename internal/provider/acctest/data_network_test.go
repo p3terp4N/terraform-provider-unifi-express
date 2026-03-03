@@ -3,12 +3,14 @@ package acctest
 import (
 	"fmt"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
+	pt "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/testing"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"testing"
 )
 
 func TestAccDataNetwork_byName(t *testing.T) {
+	pt.MarkAccTest(t)
 	defaultName := "Default"
 	v, err := version.NewVersion(testClient.Version())
 	if err != nil {
@@ -31,6 +33,7 @@ func TestAccDataNetwork_byName(t *testing.T) {
 }
 
 func TestAccDataNetwork_byID(t *testing.T) {
+	pt.MarkAccTest(t)
 	defaultName := "Default"
 	v, err := version.NewVersion(testClient.Version())
 	if err != nil {

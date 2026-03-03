@@ -3,20 +3,54 @@ package user
 import (
 	"context"
 	"errors"
-	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
 
 	"github.com/filipowm/go-unifi/unifi"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	ut "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/validators"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// TODO add validation: api.err.LocalDnsRecordRequiresFixedIp
-// TODO require v7.3+ for local dns record
-func ResourceUser() *schema.Resource {
-	return &schema.Resource{
-		Description: "The `unifi_user` resource manages network clients in the UniFi controller, which are identified by their unique MAC addresses.\n\n" +
+var (
+	_ resource.Resource                = &userResource{}
+	_ resource.ResourceWithConfigure   = &userResource{}
+	_ resource.ResourceWithImportState = &userResource{}
+	_ base.Resource                    = &userResource{}
+)
+
+type userResource struct {
+	*base.GenericResource[*userModel]
+}
+
+func NewUserResource() resource.Resource {
+	return &userResource{
+		GenericResource: base.NewGenericResource(
+			"unifi_user",
+			func() *userModel { return &userModel{} },
+			base.ResourceFunctions{
+				// CRUD handlers are nil — all four operations are overridden
+				// on userResource because this resource has custom logic for
+				// allow_existing, block/unblock, dev_id_override fingerprint,
+				// skip_forget_on_destroy, and the extra GetUserByMAC call.
+				Read:   nil,
+				Create: nil,
+				Update: nil,
+				Delete: nil,
+			},
+		),
+	}
+}
+
+func (r *userResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	resp.Schema = schema.Schema{
+		MarkdownDescription: "The `unifi_user` resource manages network clients in the UniFi controller, which are identified by their unique MAC addresses.\n\n" +
 			"This resource allows you to manage:\n" +
 			"  * Fixed IP assignments\n" +
 			"  * User groups and network access\n" +
@@ -32,340 +66,360 @@ func ResourceUser() *schema.Resource {
 			"  * Setting up local DNS records\n" +
 			"  * Organizing devices into user groups",
 
-		CreateContext: resourceUserCreate,
-		ReadContext:   resourceUserRead,
-		UpdateContext: resourceUserUpdate,
-		DeleteContext: resourceUserDelete,
-		Importer: &schema.ResourceImporter{
-			StateContext: base.ImportSiteAndID,
-		},
-
-		Schema: map[string]*schema.Schema{
-			"id": {
-				Description: "The unique identifier of the user in the UniFi controller. This is automatically assigned.",
-				Type:        schema.TypeString,
-				Computed:    true,
-			},
-			"site": {
-				Description: "The name of the UniFi site where this user should be managed. If not specified, the default site will be used.",
-				Type:        schema.TypeString,
-				Computed:    true,
-				Optional:    true,
-				ForceNew:    true,
-			},
-			"mac": {
-				Description: "The MAC address of the device/client. This is used as the unique identifier and cannot be changed " +
+		Attributes: map[string]schema.Attribute{
+			"id":   ut.ID(),
+			"site": ut.SiteAttribute(),
+			"mac": schema.StringAttribute{
+				MarkdownDescription: "The MAC address of the device/client. This is used as the unique identifier and cannot be changed " +
 					"after creation. Must be a valid MAC address format (e.g., '00:11:22:33:44:55'). MAC addresses are case-insensitive.",
-				Type:             schema.TypeString,
-				Required:         true,
-				ForceNew:         true,
-				DiffSuppressFunc: utils.MacDiffSuppressFunc,
-				ValidateFunc:     validation.StringMatch(utils.MacAddressRegexp, "Mac address is invalid"),
+				Required: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+					ut.MACNormalization(),
+				},
+				Validators: []validator.String{
+					validators.Mac,
+				},
 			},
-			"name": {
-				Description: "A friendly name for the device/client. This helps identify the device in the UniFi interface " +
+			"name": schema.StringAttribute{
+				MarkdownDescription: "A friendly name for the device/client. This helps identify the device in the UniFi interface " +
 					"(eg. 'Living Room TV', 'John's Laptop').",
-				Type:     schema.TypeString,
 				Required: true,
 			},
-			"user_group_id": {
-				Description: "The ID of the user group this client belongs to. User groups can be used to apply common " +
+			"user_group_id": schema.StringAttribute{
+				MarkdownDescription: "The ID of the user group this client belongs to. User groups can be used to apply common " +
 					"settings and restrictions to multiple clients.",
-				Type:     schema.TypeString,
 				Optional: true,
 			},
-			"note": {
-				Description: "Additional information about the client that you want to record (e.g., 'Company asset tag #12345', " +
+			"note": schema.StringAttribute{
+				MarkdownDescription: "Additional information about the client that you want to record (e.g., 'Company asset tag #12345', " +
 					"'Guest device - expires 2024-03-01').",
-				Type:     schema.TypeString,
 				Optional: true,
 			},
-			// TODO: combine this with output IP for a single attribute ip_address?
-			"fixed_ip": {
-				Description: "A static IPv4 address to assign to this client. Ensure this IP is within the client's network range " +
+			"fixed_ip": schema.StringAttribute{
+				MarkdownDescription: "A static IPv4 address to assign to this client. Ensure this IP is within the client's network range " +
 					"and not already assigned to another device.",
-				Type:         schema.TypeString,
-				Optional:     true,
-				ValidateFunc: validation.IsIPv4Address,
+				Optional: true,
+				Validators: []validator.String{
+					validators.IPv4(),
+				},
 			},
-			"network_id": {
-				Description: "The ID of the network this client should be associated with. This is particularly important " +
+			"network_id": schema.StringAttribute{
+				MarkdownDescription: "The ID of the network this client should be associated with. This is particularly important " +
 					"when using VLANs or multiple networks.",
-				Type:     schema.TypeString,
 				Optional: true,
 			},
-			"blocked": {
-				Description: "When true, this client will be blocked from accessing the network. Useful for temporarily " +
+			"blocked": schema.BoolAttribute{
+				MarkdownDescription: "When true, this client will be blocked from accessing the network. Useful for temporarily " +
 					"or permanently restricting network access for specific devices.",
-				Type:     schema.TypeBool,
 				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
 			},
-			"dev_id_override": {
-				Description: "Override the device fingerprint.",
-				Type:        schema.TypeInt,
-				Optional:    true,
+			"dev_id_override": schema.Int64Attribute{
+				MarkdownDescription: "Override the device fingerprint.",
+				Optional:            true,
 			},
-			"local_dns_record": {
-				Description: "A local DNS hostname for this client. When set, other devices on the network can resolve " +
+			"local_dns_record": schema.StringAttribute{
+				MarkdownDescription: "A local DNS hostname for this client. When set, other devices on the network can resolve " +
 					"this name to the client's IP address (e.g., 'printer.local', 'nas.home.arpa'). Such DNS record is automatically added to controller's DNS records.",
-				Type:     schema.TypeString,
 				Optional: true,
 			},
 
-			// these are "meta" attributes that control TF UX
-			"allow_existing": {
-				Description: "Allow this resource to take over management of an existing user in the UniFi controller. When true:\n" +
+			// Meta-attributes that control Terraform UX, not sent to API
+			"allow_existing": schema.BoolAttribute{
+				MarkdownDescription: "Allow this resource to take over management of an existing user in the UniFi controller. When true:\n" +
 					"  * The resource can manage users that were automatically created when devices connected\n" +
 					"  * Existing settings will be overwritten with the values specified in this resource\n" +
 					"  * If false, attempting to manage an existing user will result in an error\n\n" +
 					"Use with caution as it can modify settings for devices already connected to your network.",
-				Type:     schema.TypeBool,
 				Optional: true,
-				Default:  true,
+				Computed: true,
+				Default:  booldefault.StaticBool(true),
 			},
-			"skip_forget_on_destroy": {
-				Description: "When false (default), the client will be 'forgotten' by the controller when this resource is destroyed. " +
+			"skip_forget_on_destroy": schema.BoolAttribute{
+				MarkdownDescription: "When false (default), the client will be 'forgotten' by the controller when this resource is destroyed. " +
 					"Set to true to keep the client's history in the controller after the resource is removed from Terraform.",
-				Type:     schema.TypeBool,
 				Optional: true,
-				Default:  false,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
 			},
 
-			// computed only attributes
-			"hostname": {
-				Description: "The hostname of the user.",
-				Type:        schema.TypeString,
-				Computed:    true,
+			// Computed-only attributes
+			"hostname": schema.StringAttribute{
+				MarkdownDescription: "The hostname of the user.",
+				Computed:            true,
 			},
-			"ip": {
-				Description: "The IP address of the user.",
-				Type:        schema.TypeString,
-				Computed:    true,
+			"ip": schema.StringAttribute{
+				MarkdownDescription: "The IP address of the user.",
+				Computed:            true,
 			},
 		},
 	}
 }
 
-func resourceUserCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	req, err := resourceUserGetResourceData(d)
-	if err != nil {
-		return diag.FromErr(err)
+func (r *userResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	var plan userModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	allowExisting := d.Get("allow_existing").(bool)
+	c := r.GetClient()
+	site := c.ResolveSite(&plan)
 
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
+	body, diags := plan.AsUnifiModel(ctx)
+	if diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
 	}
+	userReq := body.(*unifi.User)
 
-	resp, err := c.CreateUser(ctx, site, req)
+	allowExisting := plan.AllowExisting.ValueBool()
+
+	result, err := c.CreateUser(ctx, site, userReq)
 	if err != nil {
 		if !utils.IsServerErrorContains(err, "api.err.MacUsed") || !allowExisting {
-			return diag.FromErr(err)
+			resp.Diagnostics.AddError("Error creating user", err.Error())
+			return
 		}
 
-		// mac in use, just absorb it
-		mac := d.Get("mac").(string)
+		// MAC in use — absorb the existing user
+		mac := plan.MAC.ValueString()
 		existing, err := c.GetUserByMAC(ctx, site, mac)
 		if err != nil {
-			return diag.FromErr(err)
+			resp.Diagnostics.AddError("Error looking up existing user by MAC", err.Error())
+			return
 		}
 
-		req.ID = existing.ID
-		req.SiteID = existing.SiteID
+		userReq.ID = existing.ID
+		userReq.SiteID = existing.SiteID
 
-		resp, err = c.UpdateUser(ctx, site, req)
+		result, err = c.UpdateUser(ctx, site, userReq)
 		if err != nil {
-			return diag.FromErr(err)
+			resp.Diagnostics.AddError("Error updating existing user", err.Error())
+			return
 		}
 	}
 
-	d.SetId(resp.ID)
-
-	if d.Get("blocked").(bool) {
-		err := c.BlockUserByMAC(ctx, site, d.Get("mac").(string))
+	// Handle block/unblock
+	if plan.Blocked.ValueBool() {
+		err := c.BlockUserByMAC(ctx, site, plan.MAC.ValueString())
 		if err != nil {
-			return diag.FromErr(err)
+			resp.Diagnostics.AddError("Error blocking user", err.Error())
+			return
 		}
 	}
 
-	if d.HasChange("dev_id_override") {
-		mac := d.Get("mac").(string)
-		device := d.Get("dev_id_override").(int)
+	// Handle device fingerprint override
+	if !plan.DevIdOverride.IsNull() && !plan.DevIdOverride.IsUnknown() {
+		mac := plan.MAC.ValueString()
+		device := int(plan.DevIdOverride.ValueInt64())
 
-		err := c.OverrideUserFingerprint(context.TODO(), site, mac, device)
+		err := c.OverrideUserFingerprint(ctx, site, mac, device)
 		if err != nil {
-			return diag.FromErr(err)
+			resp.Diagnostics.AddError("Error overriding user fingerprint", err.Error())
+			return
 		}
 
-		resp.DevIdOverride = device
+		result.DevIdOverride = device
 	}
 
-	return resourceUserSetResourceData(resp, d, site)
+	resp.Diagnostics.Append(plan.Merge(ctx, result)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Preserve meta-attributes from plan (they are not in the API response)
+	plan.SetSite(site)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func resourceUserGetResourceData(d *schema.ResourceData) (*unifi.User, error) {
-	fixedIP := d.Get("fixed_ip").(string)
-	localDnsRecord := d.Get("local_dns_record").(string)
-
-	return &unifi.User{
-		MAC:                   d.Get("mac").(string),
-		Name:                  d.Get("name").(string),
-		UserGroupID:           d.Get("user_group_id").(string),
-		Note:                  d.Get("note").(string),
-		FixedIP:               fixedIP,
-		UseFixedIP:            fixedIP != "",
-		LocalDNSRecord:        localDnsRecord,
-		LocalDNSRecordEnabled: localDnsRecord != "",
-		NetworkID:             d.Get("network_id").(string),
-		// not sure if this matters/works
-		Blocked:       d.Get("blocked").(bool),
-		DevIdOverride: d.Get("dev_id_override").(int),
-	}, nil
-}
-
-func resourceUserSetResourceData(resp *unifi.User, d *schema.ResourceData, site string) diag.Diagnostics {
-	fixedIP := ""
-	if resp.UseFixedIP {
-		fixedIP = resp.FixedIP
+func (r *userResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state userModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	localDnsRecord := ""
-	if resp.LocalDNSRecordEnabled {
-		localDnsRecord = resp.LocalDNSRecord
-	}
+	c := r.GetClient()
+	site := c.ResolveSite(&state)
+	id := state.GetID()
 
-	d.Set("site", site)
-	d.Set("mac", resp.MAC)
-	d.Set("name", resp.Name)
-	d.Set("user_group_id", resp.UserGroupID)
-	d.Set("note", resp.Note)
-	d.Set("fixed_ip", fixedIP)
-	d.Set("local_dns_record", localDnsRecord)
-	d.Set("network_id", resp.NetworkID)
-	d.Set("blocked", resp.Blocked)
-	d.Set("dev_id_override", resp.DevIdOverride)
-	d.Set("hostname", resp.Hostname)
-	d.Set("ip", resp.IP)
-
-	return nil
-}
-
-func resourceUserRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	id := d.Id()
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-
-	resp, err := c.GetUser(ctx, site, id)
+	result, err := c.GetUser(ctx, site, id)
 	if errors.Is(err, unifi.ErrNotFound) {
-		d.SetId("")
-		return nil
+		resp.State.RemoveResource(ctx)
+		return
 	}
 	if err != nil {
-		return diag.FromErr(err)
+		resp.Diagnostics.AddError("Error reading user", err.Error())
+		return
 	}
 
-	// for some reason the IP address is only on this endpoint, so issue another request
-	macResp, err := c.GetUserByMAC(ctx, site, resp.MAC)
+	// The IP address is only available via GetUserByMAC, so issue a second request
+	macResp, err := c.GetUserByMAC(ctx, site, result.MAC)
 	if errors.Is(err, unifi.ErrNotFound) {
-		d.SetId("")
-		return nil
+		resp.State.RemoveResource(ctx)
+		return
 	}
 	if err != nil {
-		return diag.FromErr(err)
+		resp.Diagnostics.AddError("Error reading user by MAC", err.Error())
+		return
 	}
 
-	// TODO: should this read the override fingerprint?
+	result.IP = macResp.IP
 
-	resp.IP = macResp.IP
+	// Save meta-attributes before merge overwrites them
+	allowExisting := state.AllowExisting
+	skipForgetOnDestroy := state.SkipForgetOnDestroy
 
-	return resourceUserSetResourceData(resp, d, site)
+	resp.Diagnostics.Append(state.Merge(ctx, result)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Restore meta-attributes (not returned by API)
+	state.AllowExisting = allowExisting
+	state.SkipForgetOnDestroy = skipForgetOnDestroy
+	state.SetSite(site)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
-func resourceUserUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
+func (r *userResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	var plan, state userModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	if d.HasChange("blocked") {
-		mac := d.Get("mac").(string)
-		if d.Get("blocked").(bool) {
+	c := r.GetClient()
+	site := c.ResolveSite(&plan)
+
+	// Handle block/unblock changes
+	planBlocked := plan.Blocked.ValueBool()
+	stateBlocked := state.Blocked.ValueBool()
+	if planBlocked != stateBlocked {
+		mac := plan.MAC.ValueString()
+		if planBlocked {
 			err := c.BlockUserByMAC(ctx, site, mac)
 			if err != nil {
-				return diag.FromErr(err)
+				resp.Diagnostics.AddError("Error blocking user", err.Error())
+				return
 			}
 		} else {
 			err := c.UnblockUserByMAC(ctx, site, mac)
 			if err != nil {
-				return diag.FromErr(err)
+				resp.Diagnostics.AddError("Error unblocking user", err.Error())
+				return
 			}
 		}
 	}
 
-	if d.HasChange("dev_id_override") {
-		mac := d.Get("mac").(string)
-		device := d.Get("dev_id_override").(int)
+	// Handle dev_id_override changes
+	planDevId := plan.DevIdOverride.ValueInt64()
+	stateDevId := state.DevIdOverride.ValueInt64()
+	devIdChanged := plan.DevIdOverride.IsNull() != state.DevIdOverride.IsNull() || planDevId != stateDevId
+	if devIdChanged {
+		mac := plan.MAC.ValueString()
+		device := int(planDevId)
 
-		err := c.OverrideUserFingerprint(context.TODO(), site, mac, device)
+		err := c.OverrideUserFingerprint(ctx, site, mac, device)
 		if err != nil {
-			return diag.FromErr(err)
-		}
-
-		if !d.HasChangesExcept("dev_id_override") {
-			return nil
+			resp.Diagnostics.AddError("Error overriding user fingerprint", err.Error())
+			return
 		}
 	}
 
-	req, err := resourceUserGetResourceData(d)
+	body, diags := plan.AsUnifiModel(ctx)
+	if diags.HasError() {
+		resp.Diagnostics.Append(diags...)
+		return
+	}
+	userReq := body.(*unifi.User)
+	userReq.ID = state.GetID()
+	userReq.SiteID = site
+
+	result, err := c.UpdateUser(ctx, site, userReq)
 	if err != nil {
-		return diag.FromErr(err)
+		resp.Diagnostics.AddError("Error updating user", err.Error())
+		return
 	}
 
-	req.ID = d.Id()
-	req.SiteID = site
-
-	resp, err := c.UpdateUser(ctx, site, req)
-	if err != nil {
-		return diag.FromErr(err)
+	resp.Diagnostics.Append(plan.Merge(ctx, result)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	return resourceUserSetResourceData(resp, d, site)
+	plan.SetSite(site)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
-func resourceUserDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	id := d.Id()
-
-	if d.Get("skip_forget_on_destroy").(bool) {
-		return nil
+func (r *userResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state userModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	site := d.Get("site").(string)
+	if state.SkipForgetOnDestroy.ValueBool() {
+		return
+	}
+
+	c := r.GetClient()
+	site := c.ResolveSite(&state)
+	id := state.GetID()
+
+	// Look up MAC instead of trusting state
+	u, err := c.GetUser(ctx, site, id)
+	if errors.Is(err, unifi.ErrNotFound) {
+		return
+	}
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading user for delete", err.Error())
+		return
+	}
+
+	err = c.DeleteUserByMAC(ctx, site, u.MAC)
+	if err != nil {
+		resp.Diagnostics.AddError("Error deleting user", err.Error())
+	}
+}
+
+func (r *userResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	id, site := base.ImportIDWithSite(req, resp)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	c := r.GetClient()
 	if site == "" {
 		site = c.Site
 	}
 
-	// lookup MAC instead of trusting state
-	u, err := c.GetUser(ctx, site, id)
-	if errors.Is(err, unifi.ErrNotFound) {
-		return nil
-	}
+	result, err := c.GetUser(ctx, site, id)
 	if err != nil {
-		return diag.FromErr(err)
+		resp.Diagnostics.AddError("Error importing user", err.Error())
+		return
 	}
 
-	err = c.DeleteUserByMAC(ctx, site, u.MAC)
-	return diag.FromErr(err)
+	// The IP address is only available via GetUserByMAC
+	macResp, err := c.GetUserByMAC(ctx, site, result.MAC)
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading user by MAC during import", err.Error())
+		return
+	}
+	result.IP = macResp.IP
+
+	var state userModel
+	resp.Diagnostics.Append(state.Merge(ctx, result)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Set defaults for meta-attributes on import
+	state.AllowExisting = types.BoolValue(true)
+	state.SkipForgetOnDestroy = types.BoolValue(false)
+	state.SetSite(site)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }

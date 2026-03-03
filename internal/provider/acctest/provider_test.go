@@ -1,18 +1,12 @@
 package acctest
 
 import (
-	"context"
-	"fmt"
 	"github.com/filipowm/go-unifi/unifi"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider"
 	pt "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/testing"
 	"github.com/hashicorp/go-version"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
-	"github.com/hashicorp/terraform-plugin-go/tfprotov5"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
-	"github.com/hashicorp/terraform-plugin-mux/tf5to6server"
-	"github.com/hashicorp/terraform-plugin-mux/tf6muxserver"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"os"
 	"sync"
@@ -75,28 +69,7 @@ func TestMain(m *testing.M) {
 }
 
 func createProviders() providersMap {
-	ctx := context.Background()
-	// Init mux servers
 	return map[string]func() (tfprotov6.ProviderServer, error){
-		"unifi": func() (tfprotov6.ProviderServer, error) {
-			return tf6muxserver.NewMuxServer(ctx,
-				providerserver.NewProtocol6(provider.NewV2("acctestv2")()),
-				func() tfprotov6.ProviderServer {
-					sdkV2Provider, err := tf5to6server.UpgradeServer(
-						ctx,
-						func() tfprotov5.ProviderServer {
-							return schema.NewGRPCProviderServer(
-								provider.New("acctestv1")(),
-							)
-						},
-					)
-					if err != nil {
-						panic(fmt.Errorf("failed to create test providers: %w", err))
-					}
-
-					return sdkV2Provider
-				},
-			)
-		},
+		"unifi": providerserver.NewProtocol6WithError(provider.NewV2("acctest")()),
 	}
 }

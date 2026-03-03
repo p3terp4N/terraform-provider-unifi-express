@@ -2,11 +2,18 @@ package provider
 
 import (
 	"context"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/apgroup"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/device"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/dns"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/firewall"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/network"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/portal"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/radius"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/routing"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/settings"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/site"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/user"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/validators"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -18,6 +25,17 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+)
+
+const (
+	ProviderUsernameDescription = "Local user name for the Unifi controller API. Can be specified with the `UNIFI_USERNAME` environment variable."
+	ProviderPasswordDescription = "Password for the user accessing the API. Can be specified with the `UNIFI_PASSWORD` environment variable."
+	ProviderAPIURLDescription   = "URL of the UniFi Express controller API. Can be specified with the `UNIFI_API` environment variable. " +
+		"Typically `https://<express-ip>:8443`. You should **NOT** supply the path (`/api`), the SDK will discover the appropriate paths."
+	ProviderSiteDescription          = "The site in the UniFi Express controller this provider will manage. Can be specified with the `UNIFI_SITE` environment variable. Default: `default`"
+	ProviderAllowInsecureDescription = "Skip verification of TLS certificates of API requests. You may need to set this to `true` " +
+		"if you are using your local API without setting up a signed certificate. Can be specified with the " +
+		"`UNIFI_INSECURE` environment variable."
 )
 
 func NewV2(version string) func() provider.Provider {
@@ -162,10 +180,29 @@ func (p *unifiProvider) Configure(ctx context.Context, req provider.ConfigureReq
 
 func (p *unifiProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
+		// Device
+		device.NewDeviceResource,
+		device.NewPortProfileResource,
+		// DNS
 		dns.NewDnsRecordResource,
+		dns.NewDynamicDNSResource,
+		// Firewall
+		firewall.NewFirewallGroupResource,
+		firewall.NewFirewallRuleResource,
 		firewall.NewFirewallZoneResource,
 		firewall.NewFirewallZonePolicyResource,
+		// Network
+		network.NewNetworkResource,
+		network.NewWLANResource,
+		// Portal
 		portal.NewPortalFileResource,
+		// RADIUS
+		radius.NewAccountResource,
+		radius.NewRadiusProfileResource,
+		// Routing
+		routing.NewPortForwardResource,
+		routing.NewStaticRouteResource,
+		// Settings
 		settings.NewAutoSpeedtestResource,
 		settings.NewCountryResource,
 		settings.NewDpiResource,
@@ -175,17 +212,37 @@ func (p *unifiProvider) Resources(_ context.Context) []func() resource.Resource 
 		settings.NewNetworkOptimizationResource,
 		settings.NewNtpResource,
 		settings.NewRsyslogdResource,
+		settings.NewSettingRadiusResource,
 		settings.NewTeleportResource,
 		settings.NewMgmtResource,
 		settings.NewUsgResource,
 		settings.NewUswResource,
+		// Site
+		site.NewSiteResource,
+		// User
+		user.NewUserGroupResource,
+		user.NewUserResource,
 	}
 }
 
 func (p *unifiProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
+		// AP Group
+		apgroup.NewAPGroupDatasource,
+		// Device
+		device.NewPortProfileDatasource,
+		// DNS
 		dns.NewDnsRecordsDatasource,
 		dns.NewDnsRecordDatasource,
+		// Firewall
 		firewall.NewFirewallZoneDatasource,
+		// Network
+		network.NewNetworkDatasource,
+		// RADIUS
+		radius.NewRadiusProfileDatasource,
+		radius.NewAccountDatasource,
+		// User
+		user.NewUserDatasource,
+		user.NewUserGroupDatasource,
 	}
 }

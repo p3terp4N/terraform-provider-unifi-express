@@ -50,17 +50,19 @@ class UniFiClient:
     def login(self):
         data = json.dumps({"username": self.username, "password": self.password}).encode()
         req = urllib.request.Request(
-            f"{self.base_url}/api/login",
+            f"{self.base_url}/api/auth/login",
             data=data,
             headers={"Content-Type": "application/json"},
         )
         try:
             resp = self.opener.open(req)
             body = json.loads(resp.read())
-            if body.get("meta", {}).get("rc") != "ok":
+            # New UniFi OS returns user object directly; old returns {"meta": {"rc": "ok"}}
+            if body.get("meta", {}).get("rc") == "ok" or body.get("unique_id"):
+                print(f"Logged in to {self.base_url}")
+            else:
                 print(f"Login failed: {body}", file=sys.stderr)
                 sys.exit(1)
-            print(f"Logged in to {self.base_url}")
         except urllib.error.URLError as e:
             print(f"Connection failed: {e}", file=sys.stderr)
             sys.exit(1)
@@ -82,13 +84,13 @@ class UniFiClient:
             return []
 
     def get_rest(self, endpoint):
-        return self.get(f"/api/s/{self.site}/rest/{endpoint}")
+        return self.get(f"/proxy/network/api/s/{self.site}/rest/{endpoint}")
 
     def get_stat(self, endpoint):
-        return self.get(f"/api/s/{self.site}/stat/{endpoint}")
+        return self.get(f"/proxy/network/api/s/{self.site}/stat/{endpoint}")
 
     def get_settings(self):
-        return self.get(f"/api/s/{self.site}/get/setting")
+        return self.get(f"/proxy/network/api/s/{self.site}/get/setting")
 
     def get_sites(self):
         return self.get("/api/self/sites")
