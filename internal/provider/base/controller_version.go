@@ -30,7 +30,7 @@ var (
 
 	// UniFi Express version constraints (Network Application 8.x)
 	ExpressMinVersion = AsVersion("8.0.0")
-	ExpressMaxVersion = AsVersion("9.0.0")
+	ExpressMaxVersion = AsVersion("10.0.0")
 )
 
 func (c *Client) SupportsWPA3() bool {

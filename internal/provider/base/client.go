@@ -29,12 +29,18 @@ type ClientConfig struct {
 }
 
 func NewClient(cfg *ClientConfig) (*Client, error) {
+	httpConfigurer := cfg.HttpConfigurer
+	if httpConfigurer == nil && cfg.Insecure {
+		httpConfigurer = func() http.RoundTripper {
+			return CreateHttpTransport(true)
+		}
+	}
 	config := &unifi.ClientConfig{
 		URL:                      cfg.Url,
 		User:                     cfg.Username,
 		Password:                 cfg.Password,
 		RememberMe:               true,
-		HttpRoundTripperProvider: cfg.HttpConfigurer,
+		HttpRoundTripperProvider: httpConfigurer,
 		ValidationMode:           unifi.DisableValidation,
 		Logger:                   unifi.NewDefaultLogger(unifi.WarnLevel),
 	}
@@ -50,10 +56,13 @@ func NewClient(cfg *ClientConfig) (*Client, error) {
 		return nil, err
 	}
 
-	v := version.Must(version.NewVersion(unifiClient.Version()))
+	v, err := version.NewVersion(unifiClient.Version())
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse controller version %q: %w", unifiClient.Version(), err)
+	}
 	if v.LessThan(ExpressMinVersion) || v.GreaterThanOrEqual(ExpressMaxVersion) {
 		return nil, fmt.Errorf(
-			"this provider targets UniFi Express (Network Application 8.x), detected version %s",
+			"this provider targets UniFi Express (Network Application 8.x+), detected version %s",
 			v,
 		)
 	}

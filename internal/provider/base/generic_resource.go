@@ -118,7 +118,10 @@ func (b *GenericResource[T]) Create(ctx context.Context, req resource.CreateRequ
 		resp.Diagnostics.AddError("Error creating resource", fmt.Sprintf("No %[1]s resource returned from the UniFi controller. %[1]s might not be supported on this controller", b.typeName))
 		return
 	}
-	plan.Merge(ctx, res)
+	resp.Diagnostics.Append(plan.Merge(ctx, res)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	plan.SetSite(site)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -133,9 +136,13 @@ func (b *GenericResource[T]) read(ctx context.Context, site string, state T, dia
 		}
 		return
 	}
-	if res != nil {
-		state.Merge(ctx, res)
+	if res == nil {
+		diag.AddError("Error reading resource",
+			fmt.Sprintf("No %s resource returned from the UniFi controller", b.typeName))
+		return
 	}
+	diag.Append(state.Merge(ctx, res)...)
+
 }
 
 func (b *GenericResource[T]) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -192,14 +199,25 @@ func (b *GenericResource[T]) Update(ctx context.Context, req resource.UpdateRequ
 		resp.Diagnostics.AddError("Error updating resource", err.Error())
 		return
 	}
-	state.Merge(ctx, res)
+	if res == nil {
+		resp.Diagnostics.AddError("Error updating resource",
+			fmt.Sprintf("No %s resource returned from the UniFi controller after update", b.typeName))
+		return
+	}
+	resp.Diagnostics.Append(state.Merge(ctx, res)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	state.SetSite(site)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
 func (b *GenericResource[T]) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	if b.Handlers.Delete == nil {
-		// Delete is not supported
+		resp.Diagnostics.AddWarning(
+			"Delete Not Supported",
+			fmt.Sprintf("%s does not support deletion. The resource will be removed from Terraform state but the setting remains on the controller.", b.typeName),
+		)
 		return
 	}
 	resp.Diagnostics.Append(checkClientConfigured(b.client)...)

@@ -1,23 +1,11 @@
 package base
 
 import (
-	"context"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"strings"
 )
 
-// for Terraform Plugin SDK v2
-func ImportSiteAndID(_ context.Context, d *schema.ResourceData, _ interface{}) ([]*schema.ResourceData, error) {
-	if id := d.Id(); strings.Contains(id, ":") {
-		importParts := strings.SplitN(id, ":", 2)
-		d.SetId(importParts[1])
-		d.Set("site", importParts[0])
-	}
-	return []*schema.ResourceData{d}, nil
-}
-
-// for Terraform Plugin Framework
+// ImportIDWithSite parses import IDs in "site:id" format for the Plugin Framework.
 func ImportIDWithSite(req resource.ImportStateRequest, resp *resource.ImportStateResponse) (string, string) {
 	id := req.ID
 	if id == "" {
@@ -34,5 +22,5 @@ func ImportIDWithSite(req resource.ImportStateRequest, resp *resource.ImportStat
 		return "", ""
 	}
 	resp.Diagnostics.AddError("Invalid ID", "ID does not contain site part. Format should be 'site:id'")
-	return id, ""
+	return "", ""
 }

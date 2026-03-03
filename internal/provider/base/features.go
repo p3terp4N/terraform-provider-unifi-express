@@ -53,20 +53,16 @@ func NewFeatureValidator(client *Client) FeatureValidator {
 	return &featureEnabledValidator{client: client, cache: make(map[string]Features), lock: sync.Mutex{}}
 }
 
-func (v *featureEnabledValidator) getFeatures(ctx context.Context, site string) Features {
-	if v.cache[site] != nil {
-		return v.cache[site]
-	}
+func (v *featureEnabledValidator) getFeatures(ctx context.Context, site string) (Features, error) {
 	v.lock.Lock()
 	defer v.lock.Unlock()
 	if v.cache[site] != nil {
-		return v.cache[site]
+		return v.cache[site], nil
 	}
 	cache := make(map[string]featureStatus)
 	features, err := v.client.ListFeatures(ctx, site)
 	if err != nil {
-		// Return an empty Features map instead of nil to avoid potential nil pointer dereference
-		return Features{}
+		return Features{}, fmt.Errorf("failed to list features for site %q: %w", site, err)
 	}
 	for _, feature := range features {
 		if feature.FeatureExists {
@@ -76,7 +72,7 @@ func (v *featureEnabledValidator) getFeatures(ctx context.Context, site string) 
 		}
 	}
 	v.cache[site] = cache
-	return v.cache[site]
+	return v.cache[site], nil
 }
 
 func (v *featureEnabledValidator) requireFeatures(ctx context.Context, site string, attrPath *path.Path, features ...string) diag.Diagnostics {
@@ -85,7 +81,11 @@ func (v *featureEnabledValidator) requireFeatures(ctx context.Context, site stri
 		return diags
 	}
 
-	f := v.getFeatures(ctx, site)
+	f, err := v.getFeatures(ctx, site)
+	if err != nil {
+		diags.AddError("Error checking controller features", err.Error())
+		return diags
+	}
 	var unavailableFeatures, disabledFeatures []string
 	for _, feature := range features {
 		if f.IsUnavailable(feature) {

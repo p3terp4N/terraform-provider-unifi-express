@@ -178,10 +178,11 @@ func TestNewFeatureValidator(t *testing.T) {
 // TestGetFeatures tests the getFeatures method of featureEnabledValidator
 func TestGetFeatures(t *testing.T) {
 	tests := []struct {
-		name     string
-		setup    func() *MockUnifiClient
-		site     string
-		expected Features
+		name      string
+		setup     func() *MockUnifiClient
+		site      string
+		expected  Features
+		expectErr bool
 	}{
 		{
 			name: "successfully get features",
@@ -210,8 +211,9 @@ func TestGetFeatures(t *testing.T) {
 					},
 				}
 			},
-			site:     "site2",
-			expected: Features{}, // Now returns empty Features instead of nil
+			site:      "site2",
+			expected:  Features{},
+			expectErr: true,
 		},
 		{
 			name: "no features returned",
@@ -238,18 +240,24 @@ func TestGetFeatures(t *testing.T) {
 				lock:   sync.Mutex{},
 			}
 
-			result := validator.getFeatures(context.Background(), tt.site)
+			result, err := validator.getFeatures(context.Background(), tt.site)
+			if tt.expectErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
 			assert.Equal(t, tt.expected, result)
 
 			// Test caching - if we call again, we should get the cached result
-			if tt.expected != nil {
+			if !tt.expectErr && tt.expected != nil {
 				// Replace the test client with one that fails
 				client.Client = &MockUnifiClient{
 					featuresFunc: func(ctx context.Context, site string) ([]unifi.DescribedFeature, error) {
 						return nil, errors.New("should not be called")
 					},
 				}
-				result = validator.getFeatures(context.Background(), tt.site)
+				result, err = validator.getFeatures(context.Background(), tt.site)
+				assert.NoError(t, err)
 				assert.Equal(t, tt.expected, result)
 			}
 		})
@@ -283,7 +291,8 @@ func TestGetFeaturesConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			features := validator.getFeatures(context.Background(), "site1")
+			features, err := validator.getFeatures(context.Background(), "site1")
+			assert.NoError(t, err)
 			assert.NotNil(t, features)
 			assert.True(t, features.IsEnabled("feature1"))
 			assert.False(t, features.IsEnabled("feature2"))

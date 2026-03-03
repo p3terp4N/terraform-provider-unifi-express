@@ -2,21 +2,138 @@ package radius
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
-
 	"github.com/filipowm/go-unifi/unifi"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
+	ut "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
 )
 
-func ResourceRadiusProfile() *schema.Resource {
-	return &schema.Resource{
-		Description: "The `unifi_radius_profile` resource manages RADIUS authentication profiles for UniFi networks.\n\n" +
+var (
+	_ resource.Resource                = &radiusProfileResource{}
+	_ resource.ResourceWithConfigure   = &radiusProfileResource{}
+	_ resource.ResourceWithImportState = &radiusProfileResource{}
+	_ base.Resource                    = &radiusProfileResource{}
+)
+
+type radiusProfileResource struct {
+	*base.GenericResource[*radiusProfileModel]
+}
+
+func NewRadiusProfileResource() resource.Resource {
+	return &radiusProfileResource{
+		GenericResource: base.NewGenericResource(
+			"unifi_radius_profile",
+			func() *radiusProfileModel { return &radiusProfileModel{} },
+			base.ResourceFunctions{
+				Read: func(ctx context.Context, client *base.Client, site, id string) (interface{}, error) {
+					return client.GetRADIUSProfile(ctx, site, id)
+				},
+				Create: func(ctx context.Context, client *base.Client, site string, model interface{}) (interface{}, error) {
+					return client.CreateRADIUSProfile(ctx, site, model.(*unifi.RADIUSProfile))
+				},
+				Update: func(ctx context.Context, client *base.Client, site string, model interface{}) (interface{}, error) {
+					return client.UpdateRADIUSProfile(ctx, site, model.(*unifi.RADIUSProfile))
+				},
+				Delete: func(ctx context.Context, client *base.Client, site, id string) error {
+					return client.DeleteRADIUSProfile(ctx, site, id)
+				},
+			},
+		),
+	}
+}
+
+func (r *radiusProfileResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	client := r.GetClient()
+	if client == nil {
+		resp.Diagnostics.AddError("Client not configured", "The provider client is not configured")
+		return
+	}
+
+	id := req.ID
+	site := client.Site
+
+	// Support site:id format
+	if strings.Contains(id, ":") {
+		parts := strings.SplitN(id, ":", 2)
+		site = parts[0]
+		id = parts[1]
+	}
+
+	// Support name=<name> lookup
+	if strings.HasPrefix(id, "name=") {
+		targetName := strings.TrimPrefix(id, "name=")
+		resolvedID, err := getRadiusProfileIDByName(ctx, client.Client, targetName, site)
+		if err != nil {
+			resp.Diagnostics.AddError("Error importing RADIUS profile by name", err.Error())
+			return
+		}
+		id = resolvedID
+	}
+
+	state := &radiusProfileModel{}
+	state.SetID(id)
+	state.SetSite(site)
+
+	// Read the resource to populate state
+	res, err := client.GetRADIUSProfile(ctx, site, id)
+	if err != nil {
+		resp.Diagnostics.AddError("Error reading RADIUS profile", err.Error())
+		return
+	}
+	state.Merge(ctx, res)
+	state.SetSite(site)
+	resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+}
+
+func (r *radiusProfileResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	serverAttributes := map[string]schema.Attribute{
+		"ip": schema.StringAttribute{
+			MarkdownDescription: "The IPv4 address of the RADIUS server (e.g., '192.168.1.100'). Must be reachable from your UniFi network.",
+			Required:            true,
+		},
+		"port": schema.Int64Attribute{
+			MarkdownDescription: "The UDP port number where the RADIUS service is listening. Valid values are between 1 and 65535.",
+			Optional:            true,
+			Computed:            true,
+			Validators: []validator.Int64{
+				int64validator.Between(1, 65535),
+			},
+		},
+		"xsecret": schema.StringAttribute{
+			MarkdownDescription: "The shared secret key used to secure communication between the UniFi controller and the RADIUS server. " +
+				"This must match the secret configured on your RADIUS server.",
+			Required:  true,
+			Sensitive: true,
+		},
+	}
+
+	// Clone the server attributes for acct_server with different default port
+	acctServerAttributes := make(map[string]schema.Attribute, len(serverAttributes))
+	for k, v := range serverAttributes {
+		acctServerAttributes[k] = v
+	}
+	// Override port default for auth servers (1812)
+	authPortAttr := serverAttributes["port"].(schema.Int64Attribute)
+	authPortAttr.Default = int64default.StaticInt64(1812)
+	serverAttributes["port"] = authPortAttr
+
+	// Override port default for acct servers (1813)
+	acctPortAttr := acctServerAttributes["port"].(schema.Int64Attribute)
+	acctPortAttr.Default = int64default.StaticInt64(1813)
+	acctServerAttributes["port"] = acctPortAttr
+
+	resp.Schema = schema.Schema{
+		MarkdownDescription: "The `unifi_radius_profile` resource manages RADIUS authentication profiles for UniFi networks.\n\n" +
 			"RADIUS (Remote Authentication Dial-In User Service) profiles enable enterprise-grade authentication and authorization for:\n" +
 			"  * 802.1X network access control\n" +
 			"  * WPA2/WPA3-Enterprise wireless networks\n" +
@@ -27,396 +144,80 @@ func ResourceRadiusProfile() *schema.Resource {
 			"  * VLAN assignment settings\n" +
 			"  * Accounting update intervals",
 
-		CreateContext: resourceRadiusProfileCreate,
-		ReadContext:   resourceRadiusProfileRead,
-		UpdateContext: resourceRadiusProfileUpdate,
-		DeleteContext: resourceRadiusProfileDelete,
-		Importer: &schema.ResourceImporter{
-			StateContext: importRadiusProfile,
-		},
-
-		Schema: map[string]*schema.Schema{
-			"id": {
-				Description: "The unique identifier of the RADIUS profile in the UniFi controller.",
-				Type:        schema.TypeString,
-				Computed:    true,
+		Attributes: map[string]schema.Attribute{
+			"id":   ut.ID("The unique identifier of the RADIUS profile in the UniFi controller."),
+			"site": ut.SiteAttribute("The name of the UniFi site where the RADIUS profile should be created. If not specified, the default site will be used."),
+			"name": schema.StringAttribute{
+				MarkdownDescription: "A friendly name for the RADIUS profile to help identify its purpose (e.g., 'Corporate Users' or 'Guest Access').",
+				Required:            true,
 			},
-			"site": {
-				Description: "The name of the UniFi site where the RADIUS profile should be created. If not specified, the default site will be used.",
-				Type:        schema.TypeString,
-				Computed:    true,
-				Optional:    true,
-				ForceNew:    true,
+			"accounting_enabled": schema.BoolAttribute{
+				MarkdownDescription: "Enable RADIUS accounting to track user sessions, including login/logout times and data usage. Useful for billing and audit purposes.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
 			},
-			"name": {
-				Description: "A friendly name for the RADIUS profile to help identify its purpose (e.g., 'Corporate Users' or 'Guest Access').",
-				Type:        schema.TypeString,
-				Required:    true,
+			"interim_update_enabled": schema.BoolAttribute{
+				MarkdownDescription: "Enable periodic updates during active sessions. This allows tracking of ongoing session data like bandwidth usage.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
 			},
-			"accounting_enabled": {
-				Description: "Enable RADIUS accounting to track user sessions, including login/logout times and data usage. Useful for billing and audit purposes.",
-				Type:        schema.TypeBool,
-				Default:     false,
-				Optional:    true,
+			"interim_update_interval": schema.Int64Attribute{
+				MarkdownDescription: "The interval (in seconds) between interim updates when `interim_update_enabled` is true. Default is 3600 seconds (1 hour).",
+				Optional:            true,
+				Computed:            true,
+				Default:             int64default.StaticInt64(3600),
 			},
-			"interim_update_enabled": {
-				Description: "Enable periodic updates during active sessions. This allows tracking of ongoing session data like bandwidth usage.",
-				Type:        schema.TypeBool,
-				Default:     false,
-				Optional:    true,
+			"use_usg_acct_server": schema.BoolAttribute{
+				MarkdownDescription: "Use the controller as a RADIUS accounting server. This allows local accounting without an external RADIUS server.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
 			},
-			"interim_update_interval": {
-				Description: "The interval (in seconds) between interim updates when `interim_update_enabled` is true. Default is 3600 seconds (1 hour).",
-				Type:        schema.TypeInt,
-				Default:     3600,
-				Optional:    true,
+			"use_usg_auth_server": schema.BoolAttribute{
+				MarkdownDescription: "Use the controller as a RADIUS authentication server. This allows local authentication without an external RADIUS server.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
 			},
-			"use_usg_acct_server": {
-				Description: "Use the controller as a RADIUS accounting server. This allows local accounting without an external RADIUS server.",
-				Type:        schema.TypeBool,
-				Default:     false,
-				Optional:    true,
+			"vlan_enabled": schema.BoolAttribute{
+				MarkdownDescription: "Enable VLAN assignment for wired clients based on RADIUS attributes. This allows network segmentation based on user authentication.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(false),
 			},
-			"use_usg_auth_server": {
-				Description: "Use the controller as a RADIUS authentication server. This allows local authentication without an external RADIUS server.",
-				Type:        schema.TypeBool,
-				Default:     false,
-				Optional:    true,
-			},
-			"vlan_enabled": {
-				Description: "Enable VLAN assignment for wired clients based on RADIUS attributes. This allows network segmentation based on user authentication.",
-				Type:        schema.TypeBool,
-				Default:     false,
-				Optional:    true,
-			},
-			"vlan_wlan_mode": {
-				Description: "VLAN assignment mode for wireless networks. Valid values are:\n" +
+			"vlan_wlan_mode": schema.StringAttribute{
+				MarkdownDescription: "VLAN assignment mode for wireless networks. Valid values are:\n" +
 					"  * `disabled` - Do not use RADIUS-assigned VLANs\n" +
 					"  * `optional` - Use RADIUS-assigned VLAN if provided\n" +
 					"  * `required` - Require RADIUS-assigned VLAN for authentication to succeed",
-				Type:         schema.TypeString,
-				Default:      "",
-				Optional:     true,
-				ValidateFunc: validation.StringInSlice([]string{"disabled", "optional", "required"}, false),
-			},
-			"auth_server": {
-				Description: "List of RADIUS authentication servers to use with this profile. Multiple servers provide failover - if the first " +
-					"server is unreachable, the system will try the next server in the list. Each server requires:\n" +
-					"  * IP address of the RADIUS server\n" +
-					"  * Shared secret for secure communication",
-				Type:     schema.TypeList,
 				Optional: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"ip": {
-							Description: "The IPv4 address of the RADIUS authentication server (e.g., '192.168.1.100'). Must be reachable from " +
-								"your UniFi network.",
-							Type:         schema.TypeString,
-							Required:     true,
-							ValidateFunc: validation.IsIPAddress,
-						},
-						"port": {
-							Description: "The UDP port number where the RADIUS authentication service is listening. The standard port is 1812, " +
-								"but this can be changed if needed to match your server configuration.",
-							Type:         schema.TypeInt,
-							Optional:     true,
-							Default:      1812,
-							ValidateFunc: validation.IsPortNumber,
-						},
-						"xsecret": {
-							Description: "The shared secret key used to secure communication between the UniFi controller and the RADIUS server. " +
-								"This must match the secret configured on your RADIUS server.",
-							Type:      schema.TypeString,
-							Required:  true,
-							Sensitive: true,
-						},
-					},
+				Computed: true,
+				Default:  stringdefault.StaticString(""),
+				Validators: []validator.String{
+					stringvalidator.OneOf("", "disabled", "optional", "required"),
 				},
 			},
-			"acct_server": {
-				Description: "List of RADIUS accounting servers to use with this profile. Accounting servers track session data like " +
-					"connection time and data usage. Each server requires:\n" +
-					"  * IP address of the RADIUS server\n" +
-					"  * Port number (default: 1813)\n" +
-					"  * Shared secret for secure communication",
-				Type:     schema.TypeList,
-				Optional: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"ip": {
-							Description: "The IPv4 address of the RADIUS accounting server (e.g., '192.168.1.100'). Must be reachable from " +
-								"your UniFi network.",
-							Type:         schema.TypeString,
-							Required:     true,
-							ValidateFunc: validation.IsIPAddress,
-						},
-						"port": {
-							Description: "The UDP port number where the RADIUS accounting service is listening. The standard port is 1813, " +
-								"but this can be changed if needed to match your server configuration.",
-							Type:         schema.TypeInt,
-							Optional:     true,
-							Default:      1813,
-							ValidateFunc: validation.IsPortNumber,
-						},
-						"xsecret": {
-							Description: "The shared secret key used to secure communication between the UniFi controller and the RADIUS server. " +
-								"This must match the secret configured on your RADIUS server.",
-							Type:      schema.TypeString,
-							Required:  true,
-							Sensitive: true,
-						},
-					},
+		},
+
+		Blocks: map[string]schema.Block{
+			"auth_server": schema.ListNestedBlock{
+				MarkdownDescription: "List of RADIUS authentication servers to use with this profile. Multiple servers provide failover - if the first " +
+					"server is unreachable, the system will try the next server in the list.",
+				NestedObject: schema.NestedBlockObject{
+					Attributes: serverAttributes,
+				},
+			},
+			"acct_server": schema.ListNestedBlock{
+				MarkdownDescription: "List of RADIUS accounting servers to use with this profile. Accounting servers track session data like " +
+					"connection time and data usage.",
+				NestedObject: schema.NestedBlockObject{
+					Attributes: acctServerAttributes,
 				},
 			},
 		},
 	}
-}
-
-func setToAuthServers(set []interface{}) ([]unifi.RADIUSProfileAuthServers, error) {
-	var authServers []unifi.RADIUSProfileAuthServers
-	for _, item := range set {
-		data, ok := item.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("unexpected data in block")
-		}
-		authServer, err := toAuthServer(data)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create port override: %w", err)
-		}
-		authServers = append(authServers, authServer)
-	}
-	return authServers, nil
-}
-
-func setToAcctServers(set []interface{}) ([]unifi.RADIUSProfileAcctServers, error) {
-	var acctServers []unifi.RADIUSProfileAcctServers
-	for _, item := range set {
-		data, ok := item.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("unexpected data in block")
-		}
-		accServer, err := toAcctServer(data)
-		if err != nil {
-			return nil, fmt.Errorf("unable to create port override: %w", err)
-		}
-		acctServers = append(acctServers, accServer)
-	}
-	return acctServers, nil
-}
-
-func toAuthServer(data map[string]interface{}) (unifi.RADIUSProfileAuthServers, error) {
-	return unifi.RADIUSProfileAuthServers{
-		IP:      data["ip"].(string),
-		Port:    data["port"].(int),
-		XSecret: data["xsecret"].(string),
-	}, nil
-}
-
-func toAcctServer(data map[string]interface{}) (unifi.RADIUSProfileAcctServers, error) {
-	return unifi.RADIUSProfileAcctServers{
-		IP:      data["ip"].(string),
-		Port:    data["port"].(int),
-		XSecret: data["xsecret"].(string),
-	}, nil
-}
-
-func setFromAuthServers(authServers []unifi.RADIUSProfileAuthServers) ([]map[string]interface{}, error) {
-	list := make([]map[string]interface{}, 0, len(authServers))
-	for _, authServer := range authServers {
-		v, err := fromAuthServer(authServer)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse ssh key: %w", err)
-		}
-		list = append(list, v)
-	}
-	return list, nil
-}
-
-func setFromAcctServers(acctServers []unifi.RADIUSProfileAcctServers) ([]map[string]interface{}, error) {
-	list := make([]map[string]interface{}, 0, len(acctServers))
-	for _, acctServer := range acctServers {
-		v, err := fromAcctServer(acctServer)
-		if err != nil {
-			return nil, fmt.Errorf("unable to parse ssh key: %w", err)
-		}
-		list = append(list, v)
-	}
-	return list, nil
-}
-
-func fromAuthServer(sshKey unifi.RADIUSProfileAuthServers) (map[string]interface{}, error) {
-	return map[string]interface{}{
-		"ip":      sshKey.IP,
-		"port":    sshKey.Port,
-		"xsecret": sshKey.XSecret,
-	}, nil
-}
-
-func fromAcctServer(sshKey unifi.RADIUSProfileAcctServers) (map[string]interface{}, error) {
-	return map[string]interface{}{
-		"ip":      sshKey.IP,
-		"port":    sshKey.Port,
-		"xsecret": sshKey.XSecret,
-	}, nil
-}
-
-func resourceRadiusProfileCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-	req, err := resourceRadiusProfileGetResourceData(d)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-	resp, err := c.CreateRADIUSProfile(ctx, site, req)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-	d.SetId(resp.ID)
-
-	return resourceRadiusProfileSetResourceData(resp, d, site)
-}
-
-func resourceRadiusProfileGetResourceData(d *schema.ResourceData) (*unifi.RADIUSProfile, error) {
-	authServers, err := setToAuthServers(d.Get("auth_server").([]interface{}))
-	if err != nil {
-		return nil, fmt.Errorf("unable to auth_server ssh_key block: %w", err)
-	}
-	acctServers, err := setToAcctServers(d.Get("acct_server").([]interface{}))
-	if err != nil {
-		return nil, fmt.Errorf("unable to acct_server ssh_key block: %w", err)
-	}
-	return &unifi.RADIUSProfile{
-		Name:                  d.Get("name").(string),
-		InterimUpdateEnabled:  d.Get("interim_update_enabled").(bool),
-		InterimUpdateInterval: d.Get("interim_update_interval").(int),
-		AccountingEnabled:     d.Get("accounting_enabled").(bool),
-		UseUsgAcctServer:      d.Get("use_usg_acct_server").(bool),
-		UseUsgAuthServer:      d.Get("use_usg_auth_server").(bool),
-		VLANEnabled:           d.Get("vlan_enabled").(bool),
-		VLANWLANMode:          d.Get("vlan_wlan_mode").(string),
-		AuthServers:           authServers,
-		AcctServers:           acctServers,
-	}, nil
-}
-
-func resourceRadiusProfileSetResourceData(resp *unifi.RADIUSProfile, d *schema.ResourceData, site string) diag.Diagnostics {
-	authServers, err := setFromAuthServers(resp.AuthServers)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-	acctServers, err := setFromAcctServers(resp.AcctServers)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	d.Set("site", site)
-	d.Set("name", resp.Name)
-
-	d.Set("interim_update_enabled", resp.InterimUpdateEnabled)
-	d.Set("interim_update_interval", resp.InterimUpdateInterval)
-	d.Set("accounting_enabled", resp.AccountingEnabled)
-	d.Set("use_usg_acct_server", resp.UseUsgAcctServer)
-	d.Set("use_usg_auth_server", resp.UseUsgAuthServer)
-	d.Set("vlan_enabled", resp.VLANEnabled)
-	d.Set("vlan_wlan_mode", resp.VLANWLANMode)
-	d.Set("auth_server", authServers)
-	d.Set("acct_server", acctServers)
-	return nil
-}
-
-func resourceRadiusProfileRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	id := d.Id()
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-	resp, err := c.GetRADIUSProfile(ctx, site, id)
-	if errors.Is(err, unifi.ErrNotFound) {
-		d.SetId("")
-		return nil
-	}
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	return resourceRadiusProfileSetResourceData(resp, d, site)
-}
-
-func resourceRadiusProfileUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	req, err := resourceRadiusProfileGetResourceData(d)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	req.ID = d.Id()
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-	req.SiteID = site
-
-	resp, err := c.UpdateRADIUSProfile(ctx, site, req)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	return resourceRadiusProfileSetResourceData(resp, d, site)
-}
-
-func resourceRadiusProfileDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	id := d.Id()
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-
-	err := c.DeleteRADIUSProfile(ctx, site, id)
-	return diag.FromErr(err)
-}
-
-func importRadiusProfile(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-	c := meta.(*base.Client)
-	id := d.Id()
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-
-	if strings.Contains(id, ":") {
-		importParts := strings.SplitN(id, ":", 2)
-		site = importParts[0]
-		id = importParts[1]
-	}
-
-	if strings.HasPrefix(id, "name=") {
-		targetName := strings.TrimPrefix(id, "name=")
-		var err error
-		if id, err = getRadiusProfileIDByName(ctx, c.Client, targetName, site); err != nil {
-			return nil, err
-		}
-	}
-
-	if id != "" {
-		d.SetId(id)
-	}
-	if site != "" {
-		d.Set("site", site)
-	}
-
-	return []*schema.ResourceData{d}, nil
 }
 
 func getRadiusProfileIDByName(ctx context.Context, client unifi.Client, profileName, site string) (string, error) {
@@ -433,12 +234,12 @@ func getRadiusProfileIDByName(ctx context.Context, client unifi.Client, profileN
 			continue
 		}
 		if idMatchingName != "" {
-			return "", fmt.Errorf("Found multiple RADIUS profiles with name '%s'", profileName)
+			return "", fmt.Errorf("found multiple RADIUS profiles with name '%s'", profileName)
 		}
 		idMatchingName = profile.ID
 	}
 	if idMatchingName == "" {
-		return "", fmt.Errorf("Found no RADIUS profile with name '%s', found: %s", profileName, strings.Join(allNames, ", "))
+		return "", fmt.Errorf("found no RADIUS profile with name '%s', found: %s", profileName, strings.Join(allNames, ", "))
 	}
 	return idMatchingName, nil
 }

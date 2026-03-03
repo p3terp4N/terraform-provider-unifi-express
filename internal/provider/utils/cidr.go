@@ -2,70 +2,43 @@ package utils
 
 import (
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"net"
 	"strings"
 )
 
-func CidrValidate(raw interface{}, key string) ([]string, []error) {
-	v, ok := raw.(string)
-	if !ok {
-		return nil, []error{fmt.Errorf("expected string, got %T", raw)}
-	}
-
-	_, _, err := net.ParseCIDR(v)
-	if err != nil {
-		return nil, []error{err}
-	}
-
-	return nil, nil
-}
-
-func CidrZeroBased(cidr string) string {
+func CidrZeroBased(cidr string) (string, error) {
 	_, cidrNet, err := net.ParseCIDR(cidr)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("invalid CIDR %q: %w", cidr, err)
 	}
 
-	return cidrNet.String()
+	return cidrNet.String(), nil
 }
 
-func CidrOneBased(cidr string) string {
+func CidrOneBased(cidr string) (string, error) {
 	_, cidrNet, err := net.ParseCIDR(cidr)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("invalid CIDR %q: %w", cidr, err)
 	}
 
-	cidrNet.IP[3]++
-
-	return cidrNet.String()
-}
-
-func CidrDiffSuppress(k, old, new string, d *schema.ResourceData) bool {
-	_, oldNet, err := net.ParseCIDR(old)
-	if err != nil {
-		return false
+	ip4 := cidrNet.IP.To4()
+	if ip4 == nil {
+		return "", fmt.Errorf("CidrOneBased only supports IPv4, got %q", cidr)
 	}
+	ip4[3]++
+	cidrNet.IP = ip4
 
-	_, newNet, err := net.ParseCIDR(new)
-	if err != nil {
-		return false
-	}
-
-	return oldNet.String() == newNet.String()
+	return cidrNet.String(), nil
 }
 
 // IsIPv4 checks if the provided address is a valid IPv4 address.
-// It returns true if the address is a valid IPv4 address, false otherwise.
 func IsIPv4(address string) bool {
 	ip := net.ParseIP(address)
 	return ip != nil && ip.To4() != nil
 }
 
 // IsIPv6 checks if the provided address is a valid IPv6 address.
-// It returns true if the address is a valid IPv6 address, false otherwise.
 func IsIPv6(address string) bool {
-
 	// Handle zone index if present
 	if idx := strings.Index(address, "%"); idx != -1 {
 		address = address[:idx]

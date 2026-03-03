@@ -2,448 +2,232 @@ package firewall
 
 import (
 	"context"
-	"errors"
-	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/utils"
-	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/validators"
 	"regexp"
 
 	"github.com/filipowm/go-unifi/unifi"
 	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/base"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
+	ut "github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/types"
+	"github.com/p3terp4N/terraform-provider-unifi-express/internal/provider/validators"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var firewallRuleProtocolRegexp = regexp.MustCompile("^$|all|([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])|tcp_udp|ah|ax.25|dccp|ddp|egp|eigrp|encap|esp|etherip|fc|ggp|gre|hip|hmp|icmp|idpr-cmtp|idrp|igmp|igp|ip|ipcomp|ipencap|ipip|ipv6|ipv6-frag|ipv6-icmp|ipv6-nonxt|ipv6-opts|ipv6-route|isis|iso-tp4|l2tp|manet|mobility-header|mpls-in-ip|ospf|pim|pup|rdp|rohc|rspf|rsvp|sctp|shim6|skip|st|tcp|udp|udplite|vmtp|vrrp|wesp|xns-idp|xtp")
-var firewallRuleProtocolV6Regexp = regexp.MustCompile("^$|([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])|ah|all|dccp|eigrp|esp|gre|icmpv6|ipcomp|ipv6|ipv6-frag|ipv6-icmp|ipv6-nonxt|ipv6-opts|ipv6-route|isis|l2tp|manet|mobility-header|mpls-in-ip|ospf|pim|rsvp|sctp|shim6|tcp|tcp_udp|udp|vrrp")
-var firewallRuleICMPv6TypenameRegexp = regexp.MustCompile("^$|address-unreachable|bad-header|beyond-scope|communication-prohibited|destination-unreachable|echo-reply|echo-request|failed-policy|neighbor-advertisement|neighbor-solicitation|no-route|packet-too-big|parameter-problem|port-unreachable|redirect|reject-route|router-advertisement|router-solicitation|time-exceeded|ttl-zero-during-reassembly|ttl-zero-during-transit|unknown-header-type|unknown-option")
+var firewallRuleProtocolRegexp = regexp.MustCompile("^($|all|([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])|tcp_udp|ah|ax.25|dccp|ddp|egp|eigrp|encap|esp|etherip|fc|ggp|gre|hip|hmp|icmp|idpr-cmtp|idrp|igmp|igp|ip|ipcomp|ipencap|ipip|ipv6|ipv6-frag|ipv6-icmp|ipv6-nonxt|ipv6-opts|ipv6-route|isis|iso-tp4|l2tp|manet|mobility-header|mpls-in-ip|ospf|pim|pup|rdp|rohc|rspf|rsvp|sctp|shim6|skip|st|tcp|udp|udplite|vmtp|vrrp|wesp|xns-idp|xtp)$")
+var firewallRuleProtocolV6Regexp = regexp.MustCompile("^($|([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])|ah|all|dccp|eigrp|esp|gre|icmpv6|ipcomp|ipv6|ipv6-frag|ipv6-icmp|ipv6-nonxt|ipv6-opts|ipv6-route|isis|l2tp|manet|mobility-header|mpls-in-ip|ospf|pim|rsvp|sctp|shim6|tcp|tcp_udp|udp|vrrp)$")
+var firewallRuleICMPv6TypenameRegexp = regexp.MustCompile("^($|address-unreachable|bad-header|beyond-scope|communication-prohibited|destination-unreachable|echo-reply|echo-request|failed-policy|neighbor-advertisement|neighbor-solicitation|no-route|packet-too-big|parameter-problem|port-unreachable|redirect|reject-route|router-advertisement|router-solicitation|time-exceeded|ttl-zero-during-reassembly|ttl-zero-during-transit|unknown-header-type|unknown-option)$")
 
-func ResourceFirewallRule() *schema.Resource {
-	return &schema.Resource{
-		Description: "The `unifi_firewall_rule` resource manages firewall rules.\n\n" +
-			"This resource allows you to create and manage firewall rules that control traffic flow between different network segments (WAN, LAN, Guest) " +
-			"for both IPv4 and IPv6 traffic. Rules can be configured to allow, drop, or reject traffic based on various criteria including protocols, " +
-			"ports, and IP addresses.\n\n" +
-			"Rules are processed in order based on their `rule_index`, with lower numbers being processed first. Custom rules should use indices between " +
-			"2000-2999 or 4000-4999 to avoid conflicts with system rules.",
+var (
+	_ resource.Resource                = &firewallRuleResource{}
+	_ resource.ResourceWithConfigure   = &firewallRuleResource{}
+	_ resource.ResourceWithImportState = &firewallRuleResource{}
+	_ base.Resource                    = &firewallRuleResource{}
+)
 
-		CreateContext: resourceFirewallRuleCreate,
-		ReadContext:   resourceFirewallRuleRead,
-		UpdateContext: resourceFirewallRuleUpdate,
-		DeleteContext: resourceFirewallRuleDelete,
-		Importer: &schema.ResourceImporter{
-			StateContext: base.ImportSiteAndID,
-		},
+type firewallRuleResource struct {
+	*base.GenericResource[*firewallRuleModel]
+}
 
-		Schema: map[string]*schema.Schema{
-			"id": {
-				Description: "The unique identifier of the firewall rule in the UniFi controller.",
-				Type:        schema.TypeString,
-				Computed:    true,
+func NewFirewallRuleResource() resource.Resource {
+	return &firewallRuleResource{
+		GenericResource: base.NewGenericResource(
+			"unifi_firewall_rule",
+			func() *firewallRuleModel { return &firewallRuleModel{} },
+			base.ResourceFunctions{
+				Read: func(ctx context.Context, client *base.Client, site, id string) (interface{}, error) {
+					return client.GetFirewallRule(ctx, site, id)
+				},
+				Create: func(ctx context.Context, client *base.Client, site string, body interface{}) (interface{}, error) {
+					return client.CreateFirewallRule(ctx, site, body.(*unifi.FirewallRule))
+				},
+				Update: func(ctx context.Context, client *base.Client, site string, body interface{}) (interface{}, error) {
+					return client.UpdateFirewallRule(ctx, site, body.(*unifi.FirewallRule))
+				},
+				Delete: func(ctx context.Context, client *base.Client, site, id string) error {
+					return client.DeleteFirewallRule(ctx, site, id)
+				},
 			},
-			"site": {
-				Description: "The name of the UniFi site where the firewall rule should be created. If not specified, the default site will be used.",
-				Type:        schema.TypeString,
-				Computed:    true,
-				Optional:    true,
-				ForceNew:    true,
+		),
+	}
+}
+
+func (r *firewallRuleResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+	portRangeValidator := stringvalidator.RegexMatches(validators.PortRangeRegexp, "invalid port range")
+	resp.Schema = schema.Schema{
+		MarkdownDescription: "The `unifi_firewall_rule` resource manages firewall rules.\n\n" +
+			"Rules control traffic flow between network segments (WAN, LAN, Guest) for both IPv4 and IPv6. " +
+			"Rules are processed in order based on `rule_index` (lower numbers first).",
+
+		Attributes: map[string]schema.Attribute{
+			"id":   ut.ID(),
+			"site": ut.SiteAttribute(),
+			"name": schema.StringAttribute{
+				MarkdownDescription: "A friendly name for the firewall rule.",
+				Required:            true,
 			},
-			"name": {
-				Description: "A friendly name for the firewall rule. This helps identify the rule's purpose in the UniFi controller UI.",
-				Type:        schema.TypeString,
-				Required:    true,
+			"action": schema.StringAttribute{
+				MarkdownDescription: "The action: `accept`, `drop`, or `reject`.",
+				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("drop", "accept", "reject"),
+				},
 			},
-			"action": {
-				Description: "The action to take when traffic matches this rule. Valid values are:\n" +
-					"  * `accept` - Allow the traffic\n" +
-					"  * `drop` - Silently block the traffic\n" +
-					"  * `reject` - Block the traffic and send an ICMP rejection message",
-				Type:         schema.TypeString,
-				Required:     true,
-				ValidateFunc: validation.StringInSlice([]string{"drop", "accept", "reject"}, false),
+			"ruleset": schema.StringAttribute{
+				MarkdownDescription: "Traffic flow this rule applies to (e.g., `WAN_IN`, `LAN_OUT`, `GUEST_LOCAL`).",
+				Required:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOf(
+						"WAN_IN", "WAN_OUT", "WAN_LOCAL",
+						"LAN_IN", "LAN_OUT", "LAN_LOCAL",
+						"GUEST_IN", "GUEST_OUT", "GUEST_LOCAL",
+						"WANv6_IN", "WANv6_OUT", "WANv6_LOCAL",
+						"LANv6_IN", "LANv6_OUT", "LANv6_LOCAL",
+						"GUESTv6_IN", "GUESTv6_OUT", "GUESTv6_LOCAL",
+					),
+				},
 			},
-			"ruleset": {
-				Description: "Defines which traffic flow this rule applies to. The format is [NETWORK]_[DIRECTION], where:\n" +
-					"  * NETWORK can be: WAN, LAN, GUEST (or their IPv6 variants WANv6, LANv6, GUESTv6)\n" +
-					"  * DIRECTION can be:\n" +
-					"    * IN - Traffic entering the network\n" +
-					"    * OUT - Traffic leaving the network\n" +
-					"    * LOCAL - Traffic destined for the USG/UDM itself\n\n" +
-					"Examples: WAN_IN (incoming WAN traffic), LAN_OUT (outgoing LAN traffic), GUEST_LOCAL (traffic to Controller from guest network)",
-				Type:         schema.TypeString,
-				Required:     true,
-				ValidateFunc: validation.StringInSlice([]string{"WAN_IN", "WAN_OUT", "WAN_LOCAL", "LAN_IN", "LAN_OUT", "LAN_LOCAL", "GUEST_IN", "GUEST_OUT", "GUEST_LOCAL", "WANv6_IN", "WANv6_OUT", "WANv6_LOCAL", "LANv6_IN", "LANv6_OUT", "LANv6_LOCAL", "GUESTv6_IN", "GUESTv6_OUT", "GUESTv6_LOCAL"}, false),
+			"rule_index": schema.Int64Attribute{
+				MarkdownDescription: "Processing order. Lower numbers processed first. Use 2000-2999 or 4000-4999 for custom rules.",
+				Required:            true,
 			},
-			"rule_index": {
-				Description: "The processing order for this rule. Lower numbers are processed first. Custom rules should use:\n" +
-					"  * 2000-2999 for rules processed before auto-generated rules\n" +
-					"  * 4000-4999 for rules processed after auto-generated rules",
-				Type:     schema.TypeInt,
-				Required: true,
-				// 2[0-9]{3}|4[0-9]{3}
+			"protocol": schema.StringAttribute{
+				MarkdownDescription: "IPv4 protocol (e.g., `all`, `tcp`, `udp`, `tcp_udp`, `icmp`, or protocol number).",
+				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(firewallRuleProtocolRegexp, "must be a valid IPv4 protocol"),
+				},
 			},
-			"protocol": {
-				Description: "The IPv4 protocol this rule applies to. Common values (not all are listed) include:\n" +
-					"  * `all` - Match all protocols\n" +
-					"  * `tcp` - TCP traffic only (e.g., web, email)\n" +
-					"  * `udp` - UDP traffic only (e.g., DNS, VoIP)\n" +
-					"  * `tcp_udp` - Both TCP and UDP\n" +
-					"  * `icmp` - ICMP traffic (ping, traceroute)\n" +
-					"  * Protocol numbers (1-255) for other protocols\n\n" +
-					"Examples:\n" +
-					"  * Use 'tcp' for web server rules (ports 80, 443)\n" +
-					"  * Use 'udp' for VoIP or gaming traffic\n" +
-					"  * Use 'all' for general network access rules",
-				Type:         schema.TypeString,
-				Optional:     true,
-				ValidateFunc: validation.StringMatch(firewallRuleProtocolRegexp, "must be a valid IPv4 protocol"),
+			"protocol_v6": schema.StringAttribute{
+				MarkdownDescription: "IPv6 protocol (e.g., `all`, `tcp`, `udp`, `tcp_udp`, `ipv6-icmp`).",
+				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(firewallRuleProtocolV6Regexp, "must be a valid IPv6 protocol"),
+				},
 			},
-			"protocol_v6": {
-				Description: "The IPv6 protocol this rule applies to. Similar to 'protocol' but for IPv6 traffic. Common values (not all are listed) include:\n" +
-					"  * `all` - Match all protocols\n" +
-					"  * `tcp` - TCP traffic only\n" +
-					"  * `udp` - UDP traffic only\n" +
-					"  * `tcp_udp` - Both TCP and UDP traffic\n" +
-					"  * `ipv6-icmp` - ICMPv6 traffic",
-				Type:         schema.TypeString,
-				Optional:     true,
-				ValidateFunc: validation.StringMatch(firewallRuleProtocolV6Regexp, "must be a valid IPv6 protocol"),
+			"icmp_typename": schema.StringAttribute{
+				MarkdownDescription: "ICMP type name when protocol is `icmp`.",
+				Optional:            true,
 			},
-			"icmp_typename": {
-				Description: "The ICMP type name when protocol is set to 'icmp'. Common values include:\n" +
-					"  * `echo-request` - ICMP ping requests\n" +
-					"  * `echo-reply` - ICMP ping replies\n" +
-					"  * `destination-unreachable` - Host/network unreachable messages\n" +
-					"  * `time-exceeded` - TTL exceeded messages (traceroute)",
-				Type:     schema.TypeString,
-				Optional: true,
+			"icmp_v6_typename": schema.StringAttribute{
+				MarkdownDescription: "ICMPv6 type name when protocol_v6 is `ipv6-icmp`.",
+				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(firewallRuleICMPv6TypenameRegexp, "must be a valid ICMPv6 type"),
+				},
 			},
-			"icmp_v6_typename": {
-				Description: "The ICMPv6 type name when protocol_v6 is set to 'ipv6-icmp'. Common values (not all are listed) include:\n" +
-					"  * `echo-request` - IPv6 ping requests\n" +
-					"  * `echo-reply` - IPv6 ping replies\n" +
-					"  * `neighbor-solicitation` - IPv6 neighbor discovery\n" +
-					"  * `neighbor-advertisement` - IPv6 neighbor announcements\n" +
-					"  * `destination-unreachable` - Host/network unreachable messages\n" +
-					"  * `packet-too-big` - Path MTU discovery messages",
-				Type:         schema.TypeString,
-				Optional:     true,
-				ValidateFunc: validation.StringMatch(firewallRuleICMPv6TypenameRegexp, "must be a ICMPv6 type"),
-			},
-			"enabled": {
-				Description: "Whether this firewall rule is active (true) or disabled (false). Defaults to true.",
-				Type:        schema.TypeBool,
-				Optional:    true,
-				Default:     true,
+			"enabled": schema.BoolAttribute{
+				MarkdownDescription: "Whether this firewall rule is active.",
+				Optional:            true,
+				Computed:            true,
+				Default:             booldefault.StaticBool(true),
 			},
 
-			// sources
-			"src_network_id": {
-				Description: "The ID of the source network this rule applies to. This can be found in the URL when viewing the network " +
-					"in the UniFi controller, or by using the network's name in the form `[site]/[network_name]`.",
-				Type:     schema.TypeString,
-				Optional: true,
+			// Sources
+			"src_network_id": schema.StringAttribute{
+				MarkdownDescription: "The ID of the source network.",
+				Optional:            true,
 			},
-			"src_network_type": {
-				Description: "The type of source network address. Valid values are:\n" +
-					"  * `ADDRv4` - Single IPv4 address\n" +
-					"  * `NETv4` - IPv4 network in CIDR notation",
-				Type:         schema.TypeString,
-				Optional:     true,
-				Default:      "NETv4",
-				ValidateFunc: validation.StringInSlice([]string{"ADDRv4", "NETv4"}, false),
+			"src_network_type": schema.StringAttribute{
+				MarkdownDescription: "Source network address type: `ADDRv4` or `NETv4`.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString("NETv4"),
+				Validators: []validator.String{
+					stringvalidator.OneOf("ADDRv4", "NETv4"),
+				},
 			},
-			"src_firewall_group_ids": {
-				Description: "A list of firewall group IDs to use as sources. Groups can contain:\n" +
-					"  * IP Address Groups - For matching specific IP addresses\n" +
-					"  * Network Groups - For matching entire subnets\n" +
-					"  * Port Groups - For matching specific port numbers\n\n" +
-					"Example uses:\n" +
-					"  * Group of trusted admin IPs for remote access\n" +
-					"  * Group of IoT device networks for isolation\n" +
-					"  * Group of common service ports for allowing specific applications",
-				Type:     schema.TypeSet,
-				Optional: true,
-				Elem:     &schema.Schema{Type: schema.TypeString},
+			"src_firewall_group_ids": schema.SetAttribute{
+				MarkdownDescription: "Firewall group IDs to use as sources.",
+				Optional:            true,
+				ElementType:         types.StringType,
 			},
-			"src_address": {
-				Description: "The source IPv4 address for the firewall rule.",
-				Type:        schema.TypeString,
-				Optional:    true,
+			"src_address": schema.StringAttribute{
+				MarkdownDescription: "Source IPv4 address.",
+				Optional:            true,
 			},
-			"src_address_ipv6": {
-				Description: "The source IPv6 address or network in CIDR notation (e.g., '2001:db8::1' or '2001:db8::/64'). " +
-					"Used for IPv6 firewall rules.",
-				Type:     schema.TypeString,
-				Optional: true,
+			"src_address_ipv6": schema.StringAttribute{
+				MarkdownDescription: "Source IPv6 address or CIDR.",
+				Optional:            true,
 			},
-			"src_port": {
-				Description: "The source port(s) for this rule. Can be:\n" +
-					"  * A single port number (e.g., '80')\n" +
-					"  * A port range (e.g., '8000:8080')\n" +
-					"  * A list of ports/ranges separated by commas",
-				Type:         schema.TypeString,
-				Optional:     true,
-				ValidateFunc: validators.PortRangeV2,
+			"src_port": schema.StringAttribute{
+				MarkdownDescription: "Source port(s). Single port, range (e.g., '8000:8080'), or comma-separated list.",
+				Optional:            true,
+				Validators: []validator.String{
+					portRangeValidator,
+				},
 			},
-			"src_mac": {
-				Description: "The source MAC address this rule applies to. Use this to create rules that match specific devices " +
-					"regardless of their IP address. Format: 'XX:XX:XX:XX:XX:XX'. MAC addresses are case-insensitive.",
-				Type:     schema.TypeString,
-				Optional: true,
+			"src_mac": schema.StringAttribute{
+				MarkdownDescription: "Source MAC address (format: XX:XX:XX:XX:XX:XX).",
+				Optional:            true,
 			},
 
-			// destinations
-			"dst_network_id": {
-				Description: "The ID of the destination network this rule applies to. This can be found in the URL when viewing the network " +
-					"in the UniFi controller.",
-				Type:     schema.TypeString,
-				Optional: true,
+			// Destinations
+			"dst_network_id": schema.StringAttribute{
+				MarkdownDescription: "The ID of the destination network.",
+				Optional:            true,
 			},
-			"dst_network_type": {
-				Description: "The type of destination network address. Valid values are:\n" +
-					"  * `ADDRv4` - Single IPv4 address\n" +
-					"  * `NETv4` - IPv4 network in CIDR notation",
-				Type:         schema.TypeString,
-				Optional:     true,
-				Default:      "NETv4",
-				ValidateFunc: validation.StringInSlice([]string{"ADDRv4", "NETv4"}, false),
+			"dst_network_type": schema.StringAttribute{
+				MarkdownDescription: "Destination network address type: `ADDRv4` or `NETv4`.",
+				Optional:            true,
+				Computed:            true,
+				Default:             stringdefault.StaticString("NETv4"),
+				Validators: []validator.String{
+					stringvalidator.OneOf("ADDRv4", "NETv4"),
+				},
 			},
-			"dst_firewall_group_ids": {
-				Description: "A list of firewall group IDs to use as destinations. Groups can contain IP addresses, networks, or port numbers. " +
-					"This allows you to create reusable sets of addresses/ports and reference them in multiple rules.",
-				Type:     schema.TypeSet,
-				Optional: true,
-				Elem:     &schema.Schema{Type: schema.TypeString},
+			"dst_firewall_group_ids": schema.SetAttribute{
+				MarkdownDescription: "Firewall group IDs to use as destinations.",
+				Optional:            true,
+				ElementType:         types.StringType,
 			},
-			"dst_address": {
-				Description: "The destination IPv4 address or network in CIDR notation (e.g., '192.168.1.10' or '192.168.0.0/24'). " +
-					"The format must match dst_network_type - use a single IP for ADDRv4 or CIDR for NETv4.",
-				Type:     schema.TypeString,
-				Optional: true,
+			"dst_address": schema.StringAttribute{
+				MarkdownDescription: "Destination IPv4 address or CIDR.",
+				Optional:            true,
 			},
-			"dst_address_ipv6": {
-				Description: "The destination IPv6 address or network in CIDR notation (e.g., '2001:db8::1' or '2001:db8::/64'). " +
-					"Used for IPv6 firewall rules.",
-				Type:     schema.TypeString,
-				Optional: true,
+			"dst_address_ipv6": schema.StringAttribute{
+				MarkdownDescription: "Destination IPv6 address or CIDR.",
+				Optional:            true,
 			},
-			"dst_port": {
-				Description: "The destination port(s) for this rule. Can be:\n" +
-					"  * A single port number (e.g., '80')\n" +
-					"  * A port range (e.g., '8000:8080')\n" +
-					"  * A list of ports/ranges separated by commas",
-				Type:         schema.TypeString,
-				Optional:     true,
-				ValidateFunc: validators.PortRangeV2,
+			"dst_port": schema.StringAttribute{
+				MarkdownDescription: "Destination port(s). Single port, range, or comma-separated list.",
+				Optional:            true,
+				Validators: []validator.String{
+					portRangeValidator,
+				},
 			},
 
-			// advanced
-			"logging": {
-				Description: "Enable logging for the firewall rule.",
-				Type:        schema.TypeBool,
-				Optional:    true,
+			// Advanced
+			"logging": schema.BoolAttribute{
+				MarkdownDescription: "Enable logging for matched traffic.",
+				Optional:            true,
 			},
-			"state_established": {
-				Description: "Match established connections. When enabled:\n" +
-					"  * Rule only applies to packets that are part of an existing connection\n" +
-					"  * Useful for allowing return traffic without creating separate rules\n" +
-					"  * Common in WAN_IN rules to allow responses to outbound connections\n\n" +
-					"Example: Allow established connections from WAN while blocking new incoming connections",
-				Type:     schema.TypeBool,
-				Optional: true,
+			"state_established": schema.BoolAttribute{
+				MarkdownDescription: "Match established connections.",
+				Optional:            true,
 			},
-			"state_invalid": {
-				Description: "Match where the state is invalid.",
-				Type:        schema.TypeBool,
-				Optional:    true,
+			"state_invalid": schema.BoolAttribute{
+				MarkdownDescription: "Match invalid state connections.",
+				Optional:            true,
 			},
-			"state_new": {
-				Description: "Match where the state is new.",
-				Type:        schema.TypeBool,
-				Optional:    true,
+			"state_new": schema.BoolAttribute{
+				MarkdownDescription: "Match new connections.",
+				Optional:            true,
 			},
-			"state_related": {
-				Description: "Match where the state is related.",
-				Type:        schema.TypeBool,
-				Optional:    true,
+			"state_related": schema.BoolAttribute{
+				MarkdownDescription: "Match related connections.",
+				Optional:            true,
 			},
-			"ip_sec": {
-				Description:  "Specify whether the rule matches on IPsec packets. Can be one of `match-ipsec` or `match-none`.",
-				Type:         schema.TypeString,
-				Optional:     true,
-				ValidateFunc: validation.StringInSlice([]string{"match-ipsec", "match-none"}, false),
+			"ip_sec": schema.StringAttribute{
+				MarkdownDescription: "IPsec matching: `match-ipsec` or `match-none`.",
+				Optional:            true,
+				Validators: []validator.String{
+					stringvalidator.OneOf("match-ipsec", "match-none"),
+				},
 			},
 		},
 	}
-}
-
-func resourceFirewallRuleCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	req, err := resourceFirewallRuleGetResourceData(d)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-
-	resp, err := c.CreateFirewallRule(ctx, site, req)
-	if err != nil {
-		if utils.IsServerErrorContains(err, "api.err.FirewallGroupTypeExists") {
-			return diag.Errorf("firewall rule groups must be of different group types (ie. a port group and address group): %s", err)
-		}
-
-		return diag.FromErr(err)
-	}
-
-	d.SetId(resp.ID)
-
-	return resourceFirewallRuleSetResourceData(resp, d, site)
-}
-
-func resourceFirewallRuleGetResourceData(d *schema.ResourceData) (*unifi.FirewallRule, error) {
-	srcFirewallGroupIDs, err := utils.SetToStringSlice(d.Get("src_firewall_group_ids").(*schema.Set))
-	if err != nil {
-		return nil, err
-	}
-
-	dstFirewallGroupIDs, err := utils.SetToStringSlice(d.Get("dst_firewall_group_ids").(*schema.Set))
-	if err != nil {
-		return nil, err
-	}
-
-	return &unifi.FirewallRule{
-		Enabled:          d.Get("enabled").(bool),
-		Name:             d.Get("name").(string),
-		Action:           d.Get("action").(string),
-		Ruleset:          d.Get("ruleset").(string),
-		RuleIndex:        d.Get("rule_index").(int),
-		Protocol:         d.Get("protocol").(string),
-		ProtocolV6:       d.Get("protocol_v6").(string),
-		ICMPTypename:     d.Get("icmp_typename").(string),
-		ICMPv6Typename:   d.Get("icmp_v6_typename").(string),
-		Logging:          d.Get("logging").(bool),
-		IPSec:            d.Get("ip_sec").(string),
-		StateEstablished: d.Get("state_established").(bool),
-		StateInvalid:     d.Get("state_invalid").(bool),
-		StateNew:         d.Get("state_new").(bool),
-		StateRelated:     d.Get("state_related").(bool),
-
-		SrcNetworkType:      d.Get("src_network_type").(string),
-		SrcMACAddress:       d.Get("src_mac").(string),
-		SrcAddress:          d.Get("src_address").(string),
-		SrcAddressIPV6:      d.Get("src_address_ipv6").(string),
-		SrcPort:             d.Get("src_port").(string),
-		SrcNetworkID:        d.Get("src_network_id").(string),
-		SrcFirewallGroupIDs: srcFirewallGroupIDs,
-
-		DstNetworkType:      d.Get("dst_network_type").(string),
-		DstAddress:          d.Get("dst_address").(string),
-		DstAddressIPV6:      d.Get("dst_address_ipv6").(string),
-		DstPort:             d.Get("dst_port").(string),
-		DstNetworkID:        d.Get("dst_network_id").(string),
-		DstFirewallGroupIDs: dstFirewallGroupIDs,
-	}, nil
-}
-
-func resourceFirewallRuleSetResourceData(resp *unifi.FirewallRule, d *schema.ResourceData, site string) diag.Diagnostics {
-	d.Set("site", site)
-	d.Set("name", resp.Name)
-	d.Set("enabled", resp.Enabled)
-	d.Set("action", resp.Action)
-	d.Set("ruleset", resp.Ruleset)
-	d.Set("rule_index", resp.RuleIndex)
-	d.Set("protocol", resp.Protocol)
-	d.Set("protocol_v6", resp.ProtocolV6)
-	d.Set("icmp_typename", resp.ICMPTypename)
-	d.Set("icmp_v6_typename", resp.ICMPv6Typename)
-	d.Set("logging", resp.Logging)
-	d.Set("ip_sec", resp.IPSec)
-	d.Set("state_established", resp.StateEstablished)
-	d.Set("state_invalid", resp.StateInvalid)
-	d.Set("state_new", resp.StateNew)
-	d.Set("state_related", resp.StateRelated)
-
-	d.Set("src_network_type", resp.SrcNetworkType)
-	d.Set("src_firewall_group_ids", utils.StringSliceToSet(resp.SrcFirewallGroupIDs))
-	d.Set("src_mac", resp.SrcMACAddress)
-	d.Set("src_address", resp.SrcAddress)
-	d.Set("src_address_ipv6", resp.SrcAddressIPV6)
-	d.Set("src_network_id", resp.SrcNetworkID)
-	d.Set("src_port", resp.SrcPort)
-
-	d.Set("dst_network_type", resp.DstNetworkType)
-	d.Set("dst_firewall_group_ids", utils.StringSliceToSet(resp.DstFirewallGroupIDs))
-	d.Set("dst_address", resp.DstAddress)
-	d.Set("dst_address_ipv6", resp.DstAddressIPV6)
-	d.Set("dst_network_id", resp.DstNetworkID)
-	d.Set("dst_port", resp.DstPort)
-
-	return nil
-}
-
-func resourceFirewallRuleRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	id := d.Id()
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-
-	resp, err := c.GetFirewallRule(ctx, site, id)
-	if errors.Is(err, unifi.ErrNotFound) {
-		d.SetId("")
-		return nil
-	}
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	return resourceFirewallRuleSetResourceData(resp, d, site)
-}
-
-func resourceFirewallRuleUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	req, err := resourceFirewallRuleGetResourceData(d)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	req.ID = d.Id()
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-	req.SiteID = site
-
-	resp, err := c.UpdateFirewallRule(ctx, site, req)
-	if err != nil {
-		return diag.FromErr(err)
-	}
-
-	return resourceFirewallRuleSetResourceData(resp, d, site)
-}
-
-func resourceFirewallRuleDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	c := meta.(*base.Client)
-
-	id := d.Id()
-
-	site := d.Get("site").(string)
-	if site == "" {
-		site = c.Site
-	}
-	err := c.DeleteFirewallRule(ctx, site, id)
-	if errors.Is(err, unifi.ErrNotFound) {
-		return nil
-	}
-	return diag.FromErr(err)
 }
